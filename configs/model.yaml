@@ -1,0 +1,103 @@
+loss:
+  ot: 1 # 0.05-> 0.1 -> 0.5->1->0
+  kl: .0 # 0.1 -> 0.5 -> 1.0->0.1->0
+  video: .1 # 0.01->0.02->0.1->0
+  adt:
+  # cross entropy
+    cls: .1
+    cls_max: .1
+  # binary cross entropy
+    rel: 1.
+  cls: 1.
+  spe: 
+    margin: .2
+    weight: 1.
+  rec: 1.
+  pri: 1.5
+  tot: 1.
+  com: 1.
+  cos:
+    margin: 0.3
+
+batchsize: 4 
+temp: 0.1
+dropout: 0.2
+eps: 1e-5
+transformer:
+  layers: 4
+  heads: 12
+lan:
+  layers: 2
+dims: 768
+hidden_size: 768
+frames: 16
+actors: 10
+
+
+fl:
+  out1: 128
+  out2: 1280
+vl:
+  out1: 96
+  # frame * 96
+  out2: 1536
+atom:
+  heads: 8
+  dims: 96
+  singular: 16
+knn:
+  threshold: 0.5
+gnn:
+  indims: 768
+  outdims: 768
+dgc:
+  layers: 3
+
+cls:
+  ag: 157
+  obj: 38
+  rel: 30 
+
+
+adapter:
+  ffn:
+    layers: 2
+    indims: 512
+  pj:
+    indims: 512
+    outdims: 768
+    eps: 1e-12
+    dropout: 0.1
+
+tse:
+  layer: 1
+  type: tfm
+  time:
+    layer: 4
+  spatial:
+    layer: 4
+
+gpnn:
+  layer: 
+    private: 4
+    common: 3
+
+  pj:
+    layer: 3
+  enc_layer: 2
+  
+mix:
+  mode: mix
+  layer: 1
+  hidden_size: 768 
+  tfm_layer: 1
+
+finetune:
+  p_nums: 10
+
+recs:
+  layer: 3
+# 0 simple 1 gpfp
+prompt:
+  type: 1
+
