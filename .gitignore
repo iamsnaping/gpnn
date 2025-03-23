@@ -41,6 +41,7 @@ infer_model_prev.py
 infer_model.py
 *.md
 backbone
+backbone/
 
 requirements.txt
 test.py
