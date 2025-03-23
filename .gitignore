@@ -40,6 +40,7 @@ infer_model_original.py
 infer_model_prev.py
 infer_model.py
 *.md
+backbone
 
 requirements.txt
 test.py
