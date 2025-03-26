@@ -226,7 +226,6 @@ class MLPCLS(nn.Module):
 
         return self.cls(self.norm(X+self.layer(X)))
 class TwoLayer(nn.Module):
-
     def __init__(self, in_dim,dropout,eps):
         super().__init__()
         self.layer=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,in_dim),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim,in_dim))

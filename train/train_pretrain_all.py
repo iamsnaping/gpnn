@@ -71,6 +71,13 @@ import warnings
 # os.environ['OMP_NUM_THREADS'] = '2'
 
 import torch.distributed as dist
+
+def set_seed(seed=3407):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed) 
+
 def weight_init(m):
     random.seed(3407)
     np.random.seed(3407)
@@ -91,9 +98,10 @@ def weight_init(m):
         m.weight.data.fill_(1)
         m.bias.data.zero_()
     elif isinstance(m,nn.Embedding) and m.weight.requires_grad==True:
-        m.weight.data.normal_(mean=.0,std=1e-5)
+        m.weight.data.normal_(0.0)
     elif isinstance(m,nn.Parameter) and m.weight.requires_grad==True:
-        nn.init.normal_(m.weight,0.0,1e-5)
+        # nn.init.normal_(m.weight,0.0)
+        m.weight.data.normal_(0.0)
 
 def weight_init_dis(m):
     rank=torch.torch.distributed.get_rank()
@@ -602,13 +610,10 @@ def train_rel_cls_sperate(args,pretrain):
         else:
             save_checkpoint(epoch+1,model,round(metrics['map']*100,5),optimizer,scheduler,time_stamp,'train')
 
-
-
-
 def load_model_dict(p,model):
     checkpoint=torch.load(p,'cpu')
     model_weight=checkpoint['model']
-    model.load_state_dict(model_weight)
+    model.load_state_dict(model_weight,strict=False)
     return model
 
 
@@ -616,13 +621,12 @@ def load_model_dict(p,model):
 def train_oracle(args,pretrain):
     config=load_config()
     config.prompt.type=args.prompt
-    config2=load_config('/home/wu_tian_ci/GAFL/gpnn/config/config.yaml')['params_config']
     test_dataset=MixAns2('test',sample_each_clip=16,train=False,mapping_type=args.ds)
     test_loader=DataLoader(test_dataset,batch_size=args.batchsize*4,num_workers=12)
 
 
-    dataset=MixAns2('train',sample_each_clip=16,train=False,mapping_type=args.ds)
-    train_loader=DataLoader(dataset,batch_size=args.batchsize,num_workers=12,shuffle=True)
+    dataset=MixAns2('train',sample_each_clip=16,train=True,mapping_type=args.ds)
+    
     device=args.device
     # model=MyModel(config,pretrain=pretrain).to(args.device)
     # model=MyModelGCN(config,pretrain=pretrain).to(args.device)
@@ -638,7 +642,9 @@ def train_oracle(args,pretrain):
         raise NotImplementedError
     model.apply(weight_init)
     # load_model_dict('/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250319/1503/20_c:88.3695_p:58.54179_o:59.57755.pth')
-
+    # model=load_model_dict('/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250319/1503/20_c:88.3695_p:58.54179_o:59.57755.pth'
+    #                 ,model)
+    # breakpoint()
     cri=Criterion(config)
     adapter=AdapterLoss(config)
     sloss=SeperationLoss(config)
@@ -661,19 +667,25 @@ def train_oracle(args,pretrain):
     time_stamp=getTimeStamp()
     loss_record_path='/home/wu_tian_ci/GAFL/recoder/loss_value'
     t_path=time_stamp[0:8]
-    loss_record_path=os.path.join(loss_record_path,t_path)
-    if not os.path.exists(loss_record_path):
-        os.mkdir(loss_record_path)
-    loss_record_path=os.path.join(loss_record_path,time_stamp[8:12]+'loss.txt')
+    loss_record_path_=os.path.join(loss_record_path,t_path)
+    if not os.path.exists(loss_record_path_):
+        os.mkdir(loss_record_path_)
+    loss_record_path=os.path.join(loss_record_path_,time_stamp[8:12]+'loss.txt')
     if not os.path.exists(loss_record_path):
         f=open(loss_record_path,'w')
         f.write('begin to write\n')
         f.write('lr: '+str(args.lr)+' '+'epoch:'+str(args.epoch)+' '+args.sup+'\n')
         f.close()
+        if not os.path.exists(os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','pretrain',time_stamp[:8],time_stamp[8:12])):
+            os.makedirs(os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','pretrain',time_stamp[:8],time_stamp[8:12]))
+        write_config(config,args,[os.path.join(loss_record_path_,time_stamp[8:12]+'pretrain_config_args.txt'),
+                                  os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','pretrain',time_stamp[:8],time_stamp[8:12],
+                                               'config_args.txt')])
     counters=0
     for epoch in range(args.epoch):
         model.train()
         txt_k=1
+        train_loader=DataLoader(dataset,batch_size=args.batchsize,num_workers=12,shuffle=True)
         with tqdm(total=len(train_loader)) as pbar:
             for batch in train_loader:
                 counters+=1
@@ -697,32 +709,9 @@ def train_oracle(args,pretrain):
                     c_ans,p_ans,cls_ans,rel_ans,m_ans1,c_features,p_features,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
                 elif args.stage==3:
                     ...
+
                 else:
                     c_ans,p_ans,cls_ans,rel_ans,m_ans1,c_features,p_features=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                # loss2,loss2_1,loss2_2=adapter(rel_ans,cls_ans,rel_l,cls_l,epoch)
-                # loss1,loss1_1=cri(ans,label)
-                # loss3,loss3_1=cri(c_ans,label)
-
-                # action cls common
-                
-                # action cls common+private
-                
-                # action cls private
-                
-
-
-
-                # # sperate
-                # loss3,loss3_1=sloss(c_node_features,p_node_features)
-                # # reconstruct loss
-                # loss4,loss4_1=rloss(construct_features,target_features)
-                # weighted relation obj_class
-                # breakpoint()
-                
-                # cos loss
-                # loss7,loss7_1=sloss2(c_ans,p_ans,mask_)
-                # private middle ans
-                
 
                 # loss=loss1+loss2+loss3+loss4+loss5+loss6
                 if args.stage==2:
@@ -734,8 +723,9 @@ def train_oracle(args,pretrain):
                     loss3,loss3_1=sloss(c_features,p_features)
                     loss=loss1+loss5+loss6*config.loss.pri+loss8+loss3+loss2
                 elif args.stage==3:
-                    loss2,loss2_1=cri(cls_ans,label)
+                    loss2,loss2_1=cri(t_ans,label)
                     loss=loss2
+
                 else:
                     loss8,loss8_1=cri(m_ans1,label)
                     loss1,loss1_1=cri(c_ans,common_label)
@@ -743,6 +733,7 @@ def train_oracle(args,pretrain):
                     loss6,loss6_1=cri(p_ans,private_label)
                     loss3,loss3_1=sloss(c_features,p_features)
                     loss=loss1+loss5+loss6*config.loss.pri+loss8+loss3
+                    # loss=loss1+loss5+loss6*config.loss.pri+loss8
                 # loss=loss1+loss2+loss4+loss5+loss6*config.loss.pri
 
                 # loss=loss1+loss2+loss5
@@ -753,9 +744,6 @@ def train_oracle(args,pretrain):
                 optimizer.step()
                 scheduler.step()
                 pbar.update(1)
-                # common total private seperate relation_cls  obj_cls reconstruct
-                # loss_str=str(loss1_1)+"_"+str(loss2_1)+"_"+str(loss6_1)+"_"+str(loss3_1)+"_"\
-                # +str(loss5_1)+"_"+str(loss5_2)+"_"+str(loss4_1)+"_"+str(loss7_1)+"_"+str(loss8_1)
 
                 if args.stage==2:
                     loss_str=str(loss1_1)+"_"+str(loss6_1)+"_"+str(loss5_1)+"_"+str(loss5_2)+"_"+str(loss8_1)+"_"+str(loss3_1)+"_"+str(loss2_1)
@@ -815,7 +803,7 @@ def train_oracle(args,pretrain):
         # total_ans acc   common_ans acc
         if args.stage==2:
             acc_str='t:'+str(round(metrics['map']*100,5))+'_c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))\
-                    +'_o1:'+str(round(metrics4['map']*100,5))
+                    +'_o1:'+str(round(metrics4['map']*100,5))+'_o2:'
         else:
             acc_str='c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))\
                     +'_o1:'+str(round(metrics4['map']*100,5))
@@ -833,13 +821,12 @@ def train_oracle(args,pretrain):
 def train_oracle_continue(args,pretrain):
     config=load_config()
     config.prompt.type=args.prompt
-    config2=load_config('/home/wu_tian_ci/GAFL/gpnn/config/config.yaml')['params_config']
     test_dataset=MixAns2('test',sample_each_clip=16,train=False,mapping_type=args.ds)
     test_loader=DataLoader(test_dataset,batch_size=args.batchsize*4,num_workers=12)
 
 
-    dataset=MixAns2('train',sample_each_clip=16,train=False,mapping_type=args.ds)
-    train_loader=DataLoader(dataset,batch_size=args.batchsize,num_workers=12,shuffle=True)
+    dataset=MixAns2('train',sample_each_clip=16,train=True,mapping_type=args.ds)
+    # train_loader=DataLoader(dataset,batch_size=args.batchsize,num_workers=12,shuffle=True)
     device=args.device
     # model=MyModel(config,pretrain=pretrain).to(args.device)
     # model=MyModelGCN(config,pretrain=pretrain).to(args.device)
@@ -856,13 +843,8 @@ def train_oracle_continue(args,pretrain):
     # model.apply(weight_init)
     model=load_model_dict('/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250319/1503/20_c:88.3695_p:58.54179_o:59.57755.pth'
                     ,model)
-
+    model.apply(weight_init)
     cri=Criterion(config)
-    adapter=AdapterLoss(config)
-    sloss=SeperationLoss(config)
-    rloss=ReconstructLoss(config)
-    sloss2=KLSeperation(config)
-
     parameters = add_weight_decay(model, args.decay)
     optimizer = optim.AdamW(parameters, lr=args.lr)
     num_batches = len(dataset) // args.batchsize
@@ -872,26 +854,30 @@ def train_oracle_continue(args,pretrain):
         num_training_steps=args.epoch * num_batches,
     )
     evaluator = MyEvaluatorActionGenome(len(test_dataset),157)
-    evaluator2 = MyEvaluatorActionGenome(len(test_dataset),158)
-    evaluator3 = MyEvaluatorActionGenome(len(test_dataset),158)
-    evaluator4 = MyEvaluatorActionGenome(len(test_dataset),157)
-    evaluator4_1 = MyEvaluatorActionGenome(len(test_dataset),157)
+    evaluator2 = MyEvaluatorActionGenome(len(test_dataset),157)
+
     time_stamp=getTimeStamp()
     loss_record_path='/home/wu_tian_ci/GAFL/recoder/loss_value'
     t_path=time_stamp[0:8]
-    loss_record_path=os.path.join(loss_record_path,t_path)
-    if not os.path.exists(loss_record_path):
-        os.mkdir(loss_record_path)
-    loss_record_path=os.path.join(loss_record_path,time_stamp[8:12]+'loss.txt')
+    loss_record_path_=os.path.join(loss_record_path,t_path)
+    if not os.path.exists(loss_record_path_):
+        os.mkdir(loss_record_path_)
+    loss_record_path=os.path.join(loss_record_path_,time_stamp[8:12]+'loss.txt')
     if not os.path.exists(loss_record_path):
         f=open(loss_record_path,'w')
         f.write('begin to write\n')
         f.write('lr: '+str(args.lr)+' '+'epoch:'+str(args.epoch)+' '+args.sup+'\n')
         f.close()
+        if not os.path.exists(os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12])):
+            os.makedirs(os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12]))
+        write_config(config,args,[os.path.join(loss_record_path_,time_stamp[8:12]+'train_config_args.txt'),
+                                  os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12],
+                                               'config_args.txt')])
     counters=0
     for epoch in range(args.epoch):
         model.train()
         txt_k=1
+        train_loader=DataLoader(dataset,batch_size=args.batchsize,num_workers=12,shuffle=True)
         with tqdm(total=len(train_loader)) as pbar:
             for batch in train_loader:
                 counters+=1
@@ -911,55 +897,12 @@ def train_oracle_continue(args,pretrain):
                 mask_=mask_.to(device)
 
                 # breakpoint()
-                if args.stage==2 or args.stage==3:
-                    cls_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                elif args.stage==4:
-                    p_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                else:
-                    c_ans,p_ans,cls_ans,rel_ans,m_ans1,m_ans2,c_features,p_features=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                # loss2,loss2_1,loss2_2=adapter(rel_ans,cls_ans,rel_l,cls_l,epoch)
-                # loss1,loss1_1=cri(ans,label)
-                # loss3,loss3_1=cri(c_ans,label)
 
-                # action cls common
-                
-                # action cls common+private
-                
-                # action cls private
-                
+                t_ans,m_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
+                loss1,loss1_1=cri(t_ans,label,5)
+                loss2,loss2_1=cri(m_ans,label,5)
 
-
-
-                # # sperate
-                # loss3,loss3_1=sloss(c_node_features,p_node_features)
-                # # reconstruct loss
-                # loss4,loss4_1=rloss(construct_features,target_features)
-                # weighted relation obj_class
-                # breakpoint()
-                
-                # cos loss
-                # loss7,loss7_1=sloss2(c_ans,p_ans,mask_)
-                # private middle ans
-                
-
-                # loss=loss1+loss2+loss3+loss4+loss5+loss6
-                if args.stage==2 or args.stage==3:
-                    loss2,loss2_1=cri(cls_ans,label)
-                    loss=loss2
-                elif args.stage==4:
-                    loss6,loss6_1=cri(p_ans,private_label,5)
-                    
-                    loss=loss6
-                elif args.stage==1:
-                    loss8,loss8_1=cri([m_ans1,m_ans2],label)
-                    loss1,loss1_1=cri(c_ans,common_label)
-                    loss5,loss5_1,loss5_2=adapter(rel_ans,cls_ans,rel_l,cls_l,epoch+1)
-                    loss6,loss6_1=cri(p_ans,private_label)
-                    loss3,loss3_1=sloss(c_features,p_features)
-                    loss=loss1+loss5+loss6*config.loss.pri+loss8+loss3
-                # loss=loss1+loss2+loss4+loss5+loss6*config.loss.pri
-
-                # loss=loss1+loss2+loss5
+                loss=loss1+loss2
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -967,16 +910,8 @@ def train_oracle_continue(args,pretrain):
                 optimizer.step()
                 scheduler.step()
                 pbar.update(1)
-                # common total private seperate relation_cls  obj_cls reconstruct
-                # loss_str=str(loss1_1)+"_"+str(loss2_1)+"_"+str(loss6_1)+"_"+str(loss3_1)+"_"\
-                # +str(loss5_1)+"_"+str(loss5_2)+"_"+str(loss4_1)+"_"+str(loss7_1)+"_"+str(loss8_1)
 
-                if args.stage==2 or args.stage==3:
-                    loss_str=str(loss2_1)
-                elif args.stage==4:
-                    loss_str=str(loss6_1)
-                elif args.stage==1:
-                    loss_str=str(loss1_1)+"_"+str(loss6_1)+"_"+str(loss5_1)+"_"+str(loss5_2)+"_"+str(loss8_1)+"_"+str(loss3_1)
+                loss_str=str(loss1_1)+"_"+str(loss2_1)
 
                 pbar.set_postfix({"Loss": loss_str})
                 f=open(loss_record_path,'a')
@@ -985,9 +920,7 @@ def train_oracle_continue(args,pretrain):
                 txt_k+=1
         evaluator.reset()
         evaluator2.reset()
-        evaluator3.reset()
-        evaluator4.reset()
-        evaluator4_1.reset()
+
         model.eval()
         with torch.no_grad():
             for batch in tqdm(test_loader):
@@ -1002,55 +935,26 @@ def train_oracle_continue(args,pretrain):
                 private_label=private_label.to(device)
                 common_label=common_label.to(device)
 
-                label=label.to(device).squeeze()
-                if args.stage==1:
-                    c_ans,p_ans,cls_ans,rel_ans,m_ans1,m_ans2,c_features,p_features=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                elif args.stage==4:
-                    p_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                else:
-                    # c_ans,p_ans,cls_ans,rel_ans,m_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                    ...
+
+                t_ans,m_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
+                
                 if len(label.shape)==1:
                     label.unsqueeze_(0)
                     common_label.unsqueeze_(0)
                     private_label.unsqueeze_(0)
-                if args.stage in [2,3]:
-                    evaluator.process(cls_ans,label)
-                elif args.stage==4:
-                    evaluator3.process(p_ans,private_label)
-                elif args.stage ==1:
-                    evaluator2.process(c_ans,common_label)
-                    evaluator3.process(p_ans,private_label)
-                    evaluator4.process(m_ans1,label)
-                    evaluator4_1.process(m_ans2,label)
-            if args.stage in [2,3]:
-                metrics = evaluator.evaluate()
-            elif args.stage==4:
-                metrics3 = evaluator3.evaluate()
-            elif args.stage==1:
-                metrics2 = evaluator2.evaluate()
-                metrics3 = evaluator3.evaluate()
-                metrics4 = evaluator4.evaluate()
-                metrics4_1 = evaluator4_1.evaluate()
-        # total_ans acc   common_ans acc
-        if args.stage in [2,3]:
-            acc_str='t:'+str(round(metrics['map']*100,5))+'_c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))\
-                    +'_o1:'+str(round(metrics4['map']*100,5))+'_o2:'+str(round(metrics4_1['map']*100,5))
-        elif args.stage ==1:
-            acc_str='c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))\
-                    +'_o:'+str(round(metrics4['map']*100,5))
-        elif args.stage==4:
-            acc_str='p:'+str(round(metrics3['map']*100,5))
-        
-        save_checkpoint(epoch+1,model,acc_str,optimizer,scheduler,time_stamp,'pretrain')
-        print('saved')
 
-        # if pretrain:
-        #     acc_str='t:'+str(round(metrics['map']*100,5))+'_c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))
-        #     save_checkpoint(epoch+1,model,acc_str,optimizer,scheduler,time_stamp,'pretrain')
-        #     print('saved')
-        # else:
-        #     save_checkpoint(epoch+1,model,round(metrics['map']*100,5),optimizer,scheduler,time_stamp,'train')
+
+                evaluator.process(t_ans,label)
+                evaluator2.process(m_ans,label)
+               
+
+        metrics1 = evaluator.evaluate()
+        metrics2 = evaluator2.evaluate()
+
+        acc_str='t:'+str(round(metrics1['map']*100,5))+'m:'+str(round(metrics2['map']*100,5))
+        
+        save_checkpoint(epoch+1,model,acc_str,optimizer,scheduler,time_stamp,'train')
+        print('saved')
   
 def train_rel_cls_sperate_multi_gpu(args,pretrain):
     config=load_config()
@@ -1622,11 +1526,11 @@ if __name__=='__main__':
         "--prompt",
         type=int,
         default=1,
-        help="prompt type 0:smiple 1 gpfp",
+        help="prompt type 0:smiple 1:gpfp",
     )
 
 
-
+    set_seed(seed=3407)
     args = parser.parse_args()
     # train(args,True
     if args.tp==2:

@@ -62,9 +62,8 @@ class SeperationLoss(Loss):
         self.config=config
     
     def __call__(self,x1,x2):
-        # Subtract the mean
+        # Subtract the mean 
         x1_mean = torch.mean(x1, (1,2,3), True)
-
         x1 = x1 - x1_mean
         x2_mean = torch.mean(x2, (1,2,3), True)
         x2 = x2 - x2_mean
@@ -72,8 +71,9 @@ class SeperationLoss(Loss):
         # Compute the cross correlation
         sigma1 = torch.sqrt(torch.mean(x1.pow(2)))
         sigma2 = torch.sqrt(torch.mean(x2.pow(2)))
-        corr = torch.mean(F.relu(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2)-self.config.loss.spe.margin))
-        # corr=F.relu(torch.abs(torch.mean(x1*x2))/(sigma1*sigma2)-self.config.loss.spe.margin)
+        # corr = torch.mean(F.relu(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2)-self.config.loss.spe.margin))
+        corr=F.relu(torch.abs(torch.mean(x1*x2))/(sigma1*sigma2)-self.config.loss.spe.margin)
+        # corr=torch.mean(F.relu(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2)))
         # breakpoint()
         return corr*self.config.loss.spe.weight,round(corr.item(),2)
 

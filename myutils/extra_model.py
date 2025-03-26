@@ -2047,7 +2047,7 @@ class GPNNMix3(nn.Module):
     # stage_1 train_stage private/common/middle
     # stage_2 train_stage total/private/common/middle
     # stage_3 inference only
-    # stage_4 retrain middle
+    # stage_4 retrain middle,total
 
     def __init__(self, config,flag=False,train_stage=1):
         super().__init__()
@@ -2062,6 +2062,7 @@ class GPNNMix3(nn.Module):
             self.model_init2(config)
         elif self.stage==4:
             self.model_init1(config)
+            self.model_init2(config)
             self.freeze()
         else:
             raise NotImplementedError
@@ -2076,7 +2077,7 @@ class GPNNMix3(nn.Module):
         self.cgpnn=GPNN5(config,config.gpnn.layer.common)
         self.pgpnn=GPNN5(config,config.gpnn.layer.private)
         if config.prompt.type==1:
-            # print('pgfp')
+            print('pgfp')
             self.pgpfp=GPFPlus(config,self.flag)
             self.cgpfp=GPFPlus(config,self.flag)
         elif config.prompt.type==0:
@@ -2086,9 +2087,13 @@ class GPNNMix3(nn.Module):
             raise NotImplementedError
 
         # self.cmffn=FFN(config.dims,config.eps,config.dims*4,config.dropout)
-        self.pmffn=FFN(config.dims,config.eps,config.dims*4,config.dropout)
+        self.mffn=FFN(config.dims,config.eps,config.dims*4,config.dropout)
+        self.mffn2=FFN(config.dims,config.eps,config.dims*4,config.dropout)
+        # for total feature
+        self.mffn3=FFN(config.dims,config.eps,config.dims*4,config.dropout)
         # self.cm_head=Head(config.dims,config.eps,config.dropout,config.cls.ag)
-        self.pm_head=Head(config.dims,config.eps,config.dropout,config.cls.ag)
+        self.m_head=Head(config.dims,config.eps,config.dropout,config.cls.ag)
+        # self.m_head2=Head(config.dims,config.eps,config.dropout,config.cls.ag)
         self.p_head=Head(config.dims,config.eps,config.dropout,config.cls.ag+1)
         self.c_head=Head(config.dims,config.eps,config.dropout,config.cls.ag+1)
         self.bbx_linear=nn.Sequential(nn.Linear(4,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
@@ -2114,33 +2119,13 @@ class GPNNMix3(nn.Module):
         for param in self.parameters():
             param.requires_grad = False
         train_modules={
-            4: [self.pgpnn, self.p_head],
+            4: [self.total_pj,self.gf,self.cls_head,self.m_head],
             2: [self.mffn, self.m_head, self.gf, self.cls_head, self.total_pj]
         }
 
         for module in train_modules.get(self.stage,[]):
             for param in module.parameters():
                 param.requires_grad=True
-
-
-        # for param in self.parameters():
-        #     param.requires_grad = False
-        # if self.stage==4:
-        #     for param in self.pgpnn.parameters():
-        #         param.requires_grad=True
-        #     for param in self.p_head.parameters():
-        #         param.requires_grad=True
-        # elif self.stage==2:
-        #     for param in self.mffn.parameters():
-        #         param.requires_grad=True
-        #     for param in self.m_head.parameters():
-        #         param.requires_grad=True
-        #     for param in self.total_pj:
-        #         param.requires_grad=True
-        #     for param in self.gf.parameters():
-        #         param.requires_grad=True
-        #     for param in self.cls_head.parameters():
-        #         param.requires_grad=True
 
 
 
@@ -2183,15 +2168,16 @@ class GPNNMix3(nn.Module):
 
         
         # common features
-        human_feature=human_obj_feature[:,:,0,:].unsqueeze(-2)
-        obj_feature=human_obj_feature[:,:,1:,:]
+
         
         
         
-        p_f=self.pmffn(self.pgpfp(human_obj_feature,task_id)+self.cgpfp(human_obj_feature,task_id))
+        p_f=self.mffn(self.pgpfp(human_obj_feature,task_id)+self.cgpfp(human_obj_feature,task_id))
+        # c_f=self.mffn2(self.pgpfp(human_obj_feature,task_id)+self.cgpfp(human_obj_feature,task_id))
         # c_f=self.cmffn(self.pgpfp(human_obj_feature,task_id)+self.cgpfp(human_obj_feature,task_id))
         # cm_ans=self.cm_head(c_f)
-        pm_ans=self.pm_head(p_f)
+        pm_ans=self.m_head(p_f)
+        # cm_ans=self.m_head2(c_f)
         # breakpoint()
         p_human_feature,p_obj_feature=self.pgpnn(p_f[:,:,0,:].unsqueeze(-2),p_f[:,:,1:,:],edge_feature,self.pgpfp,task_id)
 
@@ -2207,7 +2193,6 @@ class GPNNMix3(nn.Module):
         p_ans=self.p_head(p_features)
         # m_ans -> private common
         return c_ans,p_ans,cls_ans,rel_ans,pm_ans,c_features,p_features
-    
 
     # total only
     def forward2(self,frames,cls,rel,bbx_list,task_id):
@@ -2252,16 +2237,23 @@ class GPNNMix3(nn.Module):
         obj_feature=human_obj_feature[:,:,1:,:]
         
         
+
+        pcm_ans=self.m_head(human_obj_feature)
         
-        p_f=self.pmffn(self.pgpfp(human_obj_feature,task_id)+self.cgpfp(human_obj_feature,task_id))
+
+
+
+        p_f=self.mffn(self.pgpfp(human_obj_feature,task_id))
+        c_f=self.mffn2(self.cgpfp(human_obj_feature,task_id))
         # c_f=self.cmffn(self.pgpfp(human_obj_feature,task_id)+self.cgpfp(human_obj_feature,task_id))
         # cm_ans=self.cm_head(c_f)
-        pm_ans=self.pm_head(p_f)
+        
+
         # breakpoint()
         p_human_feature,p_obj_feature=self.pgpnn(p_f[:,:,0,:].unsqueeze(-2),p_f[:,:,1:,:],edge_feature,self.pgpfp,task_id)
 
-        c_human_feature,c_obj_feature=self.cgpnn(human_feature,obj_feature,edge_feature,self.cgpfp,task_id)
-        # c_human_feature,c_obj_feature=self.pgpnn(c_f[:,:,0,:].unsqueeze(-2),c_f[:,:,1:,:],edge_feature,self.pgpfp,task_id)
+        # c_human_feature,c_obj_feature=self.cgpnn(human_feature,obj_feature,edge_feature,self.cgpfp,task_id)
+        c_human_feature,c_obj_feature=self.pgpnn(c_f[:,:,0,:].unsqueeze(-2),c_f[:,:,1:,:],edge_feature,self.cgpfp,task_id)
 
         p_features=torch.cat([p_human_feature,p_obj_feature],dim=-2)
 
@@ -2275,7 +2267,7 @@ class GPNNMix3(nn.Module):
         t_ans=self.cls_head(self.total_pj(self.gf(p_features,c_features)))
 
 
-        return c_ans,p_ans,cls_ans,rel_ans,pm_ans,c_features,p_features,t_ans
+        return c_ans,p_ans,cls_ans,rel_ans,pcm_ans,c_features,p_features,t_ans
 
     # inference only
     def forward3(self,frames,cls,rel,bbx_list,task_id):
@@ -2292,8 +2284,10 @@ class GPNNMix3(nn.Module):
 
         pos=self.pos.repeat(B,1,Nums,1)
         adapter_feature=self.adapter(frames)
-        # supervised
 
+        # pre_feature=
+ 
+        # frames_features=
         # projection head
         frames_features=self.pj(self.tse(self.fusion(adapter_feature+bbx)+pos))
 
@@ -2318,30 +2312,28 @@ class GPNNMix3(nn.Module):
         
         
         
-        p_f=self.mffn(self.pgpfp(human_obj_feature,task_id))
-        m_ans=self.m_head(p_f)
+        p_f=self.mffn(self.pgpfp(human_obj_feature,task_id)+self.cgpfp(human_obj_feature,task_id))
+        # c_f=self.mffn2(self.pgpfp(human_obj_feature,task_id)+self.cgpfp(human_obj_feature,task_id))
+        # c_f=self.cmffn(self.pgpfp(human_obj_feature,task_id)+self.cgpfp(human_obj_feature,task_id))
+        # cm_ans=self.cm_head(c_f)
+        pm_ans=self.m_head(p_f)
+        # cm_ans=self.m_head2(c_f)
         # breakpoint()
         p_human_feature,p_obj_feature=self.pgpnn(p_f[:,:,0,:].unsqueeze(-2),p_f[:,:,1:,:],edge_feature,self.pgpfp,task_id)
 
-        c_human_feature,c_obj_feature=self.cgpnn(p_f[:,:,0,:].unsqueeze(-2),p_f[:,:,1:,:],self.cgpfp,task_id)
-
-
-
+        c_human_feature,c_obj_feature=self.cgpnn(human_feature,obj_feature,edge_feature,self.cgpfp,task_id)
+        # c_human_feature,c_obj_feature=self.pgpnn(c_f[:,:,0,:].unsqueeze(-2),c_f[:,:,1:,:],edge_feature,self.pgpfp,task_id)
 
         p_features=torch.cat([p_human_feature,p_obj_feature],dim=-2)
 
         c_features=torch.cat([c_human_feature,c_obj_feature],dim=-2)
 
 
-        rec=self.gf(p_features,c_features)
-        t_node_features=self.total_pj(rec)
-
-
-        t_ans=self.cls_head(t_node_features)
         c_ans=self.c_head(c_features)
         p_ans=self.p_head(p_features)
-
-        return t_ans,c_ans,p_ans,m_ans
+        t_ans=self.cls_head(self.total_pj(self.gf(p_features,c_features)))
+        # m_ans -> private common
+        return c_ans,p_ans,pm_ans,t_ans
 
     def forward4(self,frames,cls,rel,bbx_list,task_id):
         # nums =node+1
@@ -2357,24 +2349,18 @@ class GPNNMix3(nn.Module):
 
         pos=self.pos.repeat(B,1,Nums,1)
         adapter_feature=self.adapter(frames)
-        # supervised
-        # pre_feature=
- 
-        # frames_features=
-        # projection head
+
         frames_features=self.pj(self.tse(self.fusion(adapter_feature+bbx)+pos))
 
         # total features for a consist edge cls
         human_obj_feature=frames_features[:,:,1:,:]
         # supevised by adapter feature
-        
         human_obj_feature=human_obj_feature+cls_feature
         human_feature=human_obj_feature[:,:,0,:].unsqueeze(-2)
         human_features=human_feature.repeat(1,1,Nums-2,1)
         obj_feature=human_obj_feature[:,:,1:,:]
         global_feature=frames_features[:,:,0,:].unsqueeze(-2).repeat(1,1,Nums-2,1)
         edge_feature=self.edge_fun(torch.cat([human_features,global_feature,obj_feature],dim=-1))
-        
         # print('shap',human_features.shape,global_feature.shape,obj_feature.shape)
         edge_feature=self.edge_fun(torch.cat([human_features,global_feature,obj_feature],dim=-1))+rel_feature
 
@@ -2382,22 +2368,24 @@ class GPNNMix3(nn.Module):
         # common features
         human_feature=human_obj_feature[:,:,0,:].unsqueeze(-2)
         obj_feature=human_obj_feature[:,:,1:,:]
-        
-        
-        
         p_f=self.mffn(self.pgpfp(human_obj_feature,task_id)+self.cgpfp(human_obj_feature,task_id))
-        
+        # c_f=self.cmffn(self.pgpfp(human_obj_feature,task_id)+self.cgpfp(human_obj_feature,task_id))
+        # cm_ans=self.cm_head(c_f)
+        pm_ans=self.m_head(p_f)
         # breakpoint()
         p_human_feature,p_obj_feature=self.pgpnn(p_f[:,:,0,:].unsqueeze(-2),p_f[:,:,1:,:],edge_feature,self.pgpfp,task_id)
 
+        c_human_feature,c_obj_feature=self.cgpnn(human_feature,obj_feature,edge_feature,self.cgpfp,task_id)
+        # c_human_feature,c_obj_feature=self.pgpnn(c_f[:,:,0,:].unsqueeze(-2),c_f[:,:,1:,:],edge_feature,self.pgpfp,task_id)
+
         p_features=torch.cat([p_human_feature,p_obj_feature],dim=-2)
-        
-        p_ans=self.p_head(p_features)
 
-        return p_ans
+        c_features=torch.cat([c_human_feature,c_obj_feature],dim=-2)
+        t_ans=self.cls_head(self.total_pj(self.gf(p_features,c_features)))
+
+        # m_ans -> private common
+        return t_ans,pm_ans
     
-
-
     # add [0.,0.,1.,1.] to the first line of every batch 
     def forward(self,frames,cls,rel,bbx_list,task_id):
         if self.stage==1:

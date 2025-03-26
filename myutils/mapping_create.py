@@ -12,7 +12,7 @@ import re
 from natsort import natsorted
 import os
 import  math
-from copy import deepcopy as dc
+from copy import deepcopy as dp
 import numpy as np
 import cv2
 import torch
@@ -220,7 +220,7 @@ def trans_(csv_name,file_path):
                         print('skip frame')
                         continue
                     cls_list.append(f_name)
-            real_cls_id=dc(cls_vid)
+            real_cls_id=dp(cls_vid)
             if real_cls_id in except_list:
                 continue
             if count_dict.get(cls_vid) is not None:
@@ -341,7 +341,7 @@ def pkl_process(name,device):
 
             new_bbx=[(x[0],x[1],x[2]+x[0],x[3]+x[1]) for x in bbx_list]
             if person_flag: 
-                new_bbx[0]=dc(bbx_list[0])
+                new_bbx[0]=dp(bbx_list[0])
             # for bbx,mask,bbx_ in zip(new_bbx,mask_list,bbx_list):
             #     if (bbx[0]>= bbx[2] or bbx[1] >= bbx[3]) and mask==1:
             #         print(id_,bbx,bbx_)
@@ -495,7 +495,7 @@ def get_relation(*kwags):
 
 #             new_bbx=[(x[0],x[1],x[2]+x[0],x[3]+x[1]) for x in bbx_list]
 #             if person_flag: 
-#                 new_bbx[0]=dc(bbx_list[0])
+#                 new_bbx[0]=dp(bbx_list[0])
 #             # for bbx,mask,bbx_ in zip(new_bbx,mask_list,bbx_list):
 #             #     if (bbx[0]>= bbx[2] or bbx[1] >= bbx[3]) and mask==1:
 #             #         print(id_,bbx,bbx_)
@@ -970,8 +970,6 @@ def pkl_process_all_cls_rel(name,device):
 
     hf.close()
 
-
-
 def trans_all(csv_name,file_path):
     except_list=['R4SJJ.mp4',
                  'FC2SK.mp4',
@@ -1125,7 +1123,7 @@ def generate_bbx_mask(name):
 
             new_bbx=[(x[0],x[1],x[2]+x[0],x[3]+x[1]) for x in bbx_list]
             if person_flag: 
-                new_bbx[0]=dc(bbx_list[0])
+                new_bbx[0]=dp(bbx_list[0])
             video_bbx_list.append(new_bbx)
             vidoe_mask_list.append(mask_list)
         if frames_len!=len(video_bbx_list) or frames_len!=len(vidoe_mask_list):
@@ -1275,7 +1273,7 @@ def generate_bbx_mask_cls_rel(name):
             #     print(new_bbx)
             #     breakpoint()
             if person_flag: 
-                new_bbx[0]=dc(bbx_list[0])
+                new_bbx[0]=dp(bbx_list[0])
             
             video_size=video2size[key.split('.')[0]]
             new_bbx2=[extend_bbx(bx,mk,video_size) for bx,mk in zip(new_bbx,mask_list)]
@@ -1375,20 +1373,17 @@ def get_sperate_labels_expand(name,labels,full_list):
     return label_list
 
 def get_sperate_labels_constrain(name,labels,full_list,sample_tokens,padding):
-    labels=list(set(labels))
+    labels=list(labels)
     token_list=[int(i) for i in labels]
 
     contra_set=set(full_list)-set(token_list)
 
     token_set=set(token_list)
     contra_list=list(contra_set)
-    
-    list_len=len(token_list)
     max_labels=16
     random_l=random.sample(contra_list,max_labels)
-    e_token_list=token_list+random.sample(contra_list,max_labels-len(token_list))
     if sample_tokens==0:
-            return {'id':name,'token':random_l,'common':[157],'private':token_list}
+        return {'id':name,'token':random_l,'common':[157],'private':token_list}
     if sample_tokens==max_labels:
         return {'id':name,'token':token_list,'private':[157],'common':token_list}
     # label_list=[{'id':name,'token':e_token_list,'private':[157],'common':token_list},
@@ -1402,6 +1397,10 @@ def get_sperate_labels_constrain(name,labels,full_list,sample_tokens,padding):
         t_list_token=t_list+t_list_con
     t_set=set(t_list)
     p_list=list(token_set-t_set)    
+    if len(p_list)==0:
+        p_list=[157]
+    if len(t_list)==0:
+        t_list=[157]
     return {
             'id':name,
             'token':t_list_token,
@@ -1457,8 +1456,6 @@ def tally_label(name):
         print(round(len_label[i]/sum_len,2),end=' ')
 
 
-
-
 def mapping_table_expand(name):
     full_list=[i for i in range(157)]
     json_file=json.load(
@@ -1504,7 +1501,6 @@ def mapping_table_expand2(name):
     print(name,':',len(ans_list),' ',len(keys),' ',np.mean(len_a),' ',np.sum(len_a),' ',len(len_a))
     json.dump(ans_list,open(json_save_path,'w'))
 
-
 def mapping_table_expand3(name):
     full_list=[i for i in range(157)]
     json_file=json.load(
@@ -1530,7 +1526,6 @@ def mapping_table_expand3(name):
     print(name,':',len(ans_list),' ',len(keys),' ',np.mean(len_a),' ',np.sum(len_a),' ',len(len_a))
     json.dump(ans_list,open(json_save_path,'w'))
 
-
 def mapping_table_seperate(name,max_token,min_token,padding):
     full_list=[i for i in range(157)]
     json_file=json.load(
@@ -1548,15 +1543,12 @@ def mapping_table_seperate(name,max_token,min_token,padding):
         json_set=set(json_file[label_name])
         if len(json_set)>16:
             continue
-        len_a.append(len(list(json_set)))
+        # len_a.append(len(list(json_set)))
         for tokens in range(min_token,max_token+1):
             if tokens > len(json_set):
                 break
-            l=get_sperate_labels_constrain(k,json_file[label_name],full_list,tokens,padding)
+            l=get_sperate_labels_constrain(k,json_set,full_list,tokens,padding)
             ans_list[tokens-min_token].append(l)
-        # l2=get_sperate_labels(k,json_file[label_name],full_list)
-        # ans_list.extend(l)
-        # ans_list.extend(l2)
 
     # print(name,':',len(ans_list),' ',len(keys),' ',np.mean(len_a),' ',np.sum(len_a),' ',len(len_a))
     for i in range(max_token-min_token+1):
@@ -1745,7 +1737,7 @@ def cut_2():
                     person_img=img.crop(tuple(pbbx))
                     person_img.save(os.path.join(person_dir,video.split('.')[0]+png_name.split('.')[0]+str(iddx)+'person.png'))
    
-from copy import deepcopy as dp
+
 
 def label_compute(name):
     full_list=[i for i in range(157)]
@@ -1807,7 +1799,7 @@ if __name__=="__main__":
     # print(len(cls_dict.keys()))
     # label_compute('train')
     # label_compute('test')
-    mapping_table_seperate('test',16,1,True)
+    mapping_table_seperate('test',16,0,True)
     mapping_table_seperate('test',16,1,False)
     # label_compute('test')
     # tally_bbx_in_video()
