@@ -2236,15 +2236,16 @@ class GPNNMix3(nn.Module):
         human_feature=human_obj_feature[:,:,0,:].unsqueeze(-2)
         obj_feature=human_obj_feature[:,:,1:,:]
         
-        
-
+        p_noise=self.pgpfp.get_prompt(human_obj_feature,task_id)
+        c_noise=self.cgpfp.get_prompt(human_obj_feature,task_id)
+        human_obj_feature=self.mffn(human_obj_feature+p_noise+c_noise)
         pcm_ans=self.m_head(human_obj_feature)
         
 
 
 
-        p_f=self.mffn(self.pgpfp(human_obj_feature,task_id))
-        c_f=self.mffn2(self.cgpfp(human_obj_feature,task_id))
+        p_f=self.mffn2(self.pgpfp(human_obj_feature,task_id))
+        c_f=self.mffn3(self.cgpfp(human_obj_feature,task_id))
         # c_f=self.cmffn(self.pgpfp(human_obj_feature,task_id)+self.cgpfp(human_obj_feature,task_id))
         # cm_ans=self.cm_head(c_f)
         
