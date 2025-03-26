@@ -446,10 +446,6 @@ class ReconstructNetwork(nn.Module):
 
     def __init__(self,config):
         super().__init__()
-        # self.layer1=FFN(config.dims,config.eps,config.dims*4,config.dropout)
-        # self.layer1=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims,config.dims),nn.GELU(),
-        #                           nn.Dropout(config.dropout),nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
-        # self.layer2=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
         self.layer=MLPs(config.dims,config.dropout,config.eps,config.recs.layer)
     
     def forward(self,X):
@@ -2087,7 +2083,10 @@ class GPNNMix3(nn.Module):
             raise NotImplementedError
 
         # self.cmffn=FFN(config.dims,config.eps,config.dims*4,config.dropout)
-        self.mffn=FFN(config.dims,config.eps,config.dims*4,config.dropout)
+        # self.mffn=FFN(config.dims,config.eps,config.dims*4,config.dropout)
+
+        self.mffn=TwoLayer(config.dims,config.dropout,config.eps)
+
         self.mffn2=FFN(config.dims,config.eps,config.dims*4,config.dropout)
         # for total feature
         self.mffn3=FFN(config.dims,config.eps,config.dims*4,config.dropout)
@@ -2107,6 +2106,8 @@ class GPNNMix3(nn.Module):
         self.pj=ProjectionHeadFT(config.dims,config.eps,config.dims*4,config.dropout)
         # front embedding
         self.pos = nn.Parameter(torch.zeros(1,16,1,768))
+
+        self.recs=ReconstructNetwork(config)
 
     # stage 2/3
     def model_init2(self,config):
@@ -2242,8 +2243,6 @@ class GPNNMix3(nn.Module):
         pcm_ans=self.m_head(human_obj_feature)
         
 
-
-
         p_f=self.mffn2(self.pgpfp(human_obj_feature,task_id))
         c_f=self.mffn3(self.cgpfp(human_obj_feature,task_id))
         # c_f=self.cmffn(self.pgpfp(human_obj_feature,task_id)+self.cgpfp(human_obj_feature,task_id))
@@ -2265,10 +2264,12 @@ class GPNNMix3(nn.Module):
         p_ans=self.p_head(p_features)
         # rec=
         # t_node_features=
-        t_ans=self.cls_head(self.total_pj(self.gf(p_features,c_features)))
+        t_node=self.gf(p_features,c_features)
+        t_ans=self.cls_head(self.total_pj(t_node))
+        recs=self.recs(t_node)
+        
 
-
-        return c_ans,p_ans,cls_ans,rel_ans,pcm_ans,c_features,p_features,t_ans
+        return c_ans,p_ans,cls_ans,rel_ans,pcm_ans,c_features,p_features,recs,t_ans
 
     # inference only
     def forward3(self,frames,cls,rel,bbx_list,task_id):
