@@ -43,7 +43,7 @@ torch_extra/
 *.md
 /backbone
 /backbone/
-
+/train/sh_file
 /requirements.txt
 /test.py
 /train_net_dynamic.py
