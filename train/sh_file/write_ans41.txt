@@ -1,0 +1,16 @@
+video:1 total:95.833%±0.0%	common:100.0%±0.0%	private:100.0%±0.0%	middle:95.0%±0.0%	
+video:2 total:90.591%±1.089%	common:91.253%±1.779%	private:95.441%±4.559%	middle:86.167%±0.0%	
+video:3 total:87.592%±0.993%	common:87.051%±2.707%	private:88.108%±8.6%	middle:79.776%±0.0%	
+video:4 total:81.571%±1.584%	common:86.421%±4.87%	private:80.965%±11.017%	middle:77.397%±0.0%	
+video:5 total:78.395%±2.324%	common:84.554%±1.97%	private:73.589%±13.321%	middle:75.261%±0.0%	
+video:6 total:76.377%±3.071%	common:84.555%±4.187%	private:71.027%±13.028%	middle:69.562%±0.0%	
+video:7 total:75.046%±3.648%	common:84.341%±6.255%	private:68.371%±13.016%	middle:68.503%±0.0%	
+video:8 total:75.8%±3.632%	common:84.115%±6.349%	private:65.138%±13.563%	middle:70.586%±0.0%	
+video:9 total:72.682%±3.476%	common:85.031%±4.132%	private:66.341%±12.103%	middle:67.276%±0.0%	
+video:10 total:72.657%±4.56%	common:85.065%±5.238%	private:64.463%±12.087%	middle:67.632%±0.0%	
+video:11 total:74.799%±3.632%	common:85.297%±5.764%	private:64.598%±11.505%	middle:68.428%±0.0%	
+video:12 total:69.274%±3.911%	common:83.841%±5.152%	private:58.99%±13.14%	middle:64.155%±0.0%	
+video:13 total:74.572%±3.625%	common:86.633%±6.642%	private:65.743%±10.502%	middle:69.417%±0.0%	
+video:14 total:73.376%±3.602%	common:87.355%±5.752%	private:65.021%±9.998%	middle:68.473%±0.0%	
+video:15 total:76.386%±3.824%	common:88.858%±5.275%	private:67.249%±9.543%	middle:70.497%±0.0%	
+video:16 total:74.034%±3.946%	common:91.572%±3.877%	private:68.581%±8.456%	middle:68.224%±0.0%	

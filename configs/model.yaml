@@ -7,9 +7,13 @@ loss:
     rel: 1.
   cls: 1.
   spe: 
-    margin: .01
-    weight: 1.
-  rec: 1.
+    margin: .2
+    weight: 1.0
+    max_mar: .7
+  rec: 
+    margin: .2
+    weight: 1.0
+    max_mar: .7
   pri: 1.
   tot: 1.
   com: 1.
@@ -75,8 +79,9 @@ tse:
 
 gpnn:
   layer: 
-    private: 4
+    private: 3
     common: 3
+    one: 3
   pj:
     layer: 3
   enc_layer: 2
@@ -86,6 +91,8 @@ mix:
   layer: 1
   hidden_size: 768 
   tfm_layer: 1
+
+
 
 finetune:
   p_nums: 10

@@ -24,7 +24,6 @@ def write_config(config,args,paths):
             continue
         new_dict[key]=value
     val_dict=vars(args)
-
     for p in paths:
         f=open(p,'w')
         f.write('CONFIG'+'\n')

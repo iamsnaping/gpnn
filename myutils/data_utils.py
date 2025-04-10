@@ -369,7 +369,8 @@ def getTimeStamp():
 class MyEvaluatorActionGenome:
     def __init__(
         self, total_instances: int, total_classes: int
-    ):
+    ,flag=False):
+        self.flag=flag
         self.total_instances = total_instances
         self.total_classes = total_classes
         self.reset()
@@ -383,16 +384,24 @@ class MyEvaluatorActionGenome:
     def process(self, logits, labels):
         # Action Genome only for STLT so far
         size = logits.shape[0]
-        self.predictions[self.index : self.index + size] = (
-            logits.cpu().sigmoid().numpy()
-        )
+        if self.flag:
+            self.predictions[self.index : self.index + size] = (
+                torch.softmax(logits,dim=-1).cpu().numpy()
+            )
+        else:
+            self.predictions[self.index : self.index + size] = (
+                logits.cpu().sigmoid().numpy()
+            )
         self.ground_truths[self.index : self.index + size] = labels.cpu().numpy()
         self.index += size
 
     def evaluate(self):
-        mean_average_precision, _, _ = charades_map(
-            self.predictions, self.ground_truths
-        )
+        if self.flag:
+            mean_average_precision=np.sum(np.argmax(self.predictions,axis=-1)==np.argmax(self.ground_truths,axis=-1))/self.predictions.shape[0]
+        else:
+            mean_average_precision, _, _ = charades_map(
+                self.predictions, self.ground_truths
+            )
 
         return {"map": mean_average_precision}
 
@@ -408,15 +417,17 @@ def mAP(submission_array, gt_array):
     # https://github.com/gsig/charades-algorithms/blob/master/pytorch/utils/map.py
     m_aps = []
     n_classes = submission_array.shape[1]
+
     for oc_i in range(n_classes):
         sorted_idxs = np.argsort(-submission_array[:, oc_i])
-        tp = gt_array[:, oc_i][sorted_idxs] == 1
+        tp = gt_array[:, oc_i][sorted_idxs] == 1.
         fp = np.invert(tp)
         n_pos = tp.sum()
         if n_pos < 0.1:
-            m_aps.append(float("nan"))
+            m_aps.append(float('nan'))
+            # m_aps.append(0.0)
             continue
-        fp.sum()
+        # fp.sum()
         f_pcs = np.cumsum(fp)
         t_pcs = np.cumsum(tp)
         prec = t_pcs / (f_pcs + t_pcs).astype(float)
@@ -426,7 +437,8 @@ def mAP(submission_array, gt_array):
                 avg_prec += prec[i]
         m_aps.append(avg_prec / n_pos.astype(float))
     m_aps = np.array(m_aps)
-    m_ap = np.mean(m_aps)
+    # m_ap = np.mean(m_aps)
+    m_ap=np.nanmean(m_aps)
     w_ap = m_aps * gt_array.sum(axis=0) / gt_array.sum().sum().astype(float)
     return m_ap, w_ap, m_aps
 

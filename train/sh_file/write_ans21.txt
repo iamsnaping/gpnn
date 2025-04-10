@@ -1,0 +1,1 @@
+video: all  total:67.958%	common:86.338%	private:58.789%	middle:60.876%	

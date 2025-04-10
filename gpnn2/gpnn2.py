@@ -353,9 +353,9 @@ class GPNN4(nn.Module):
         return self.edges
 
 
-    def set_visual(self):
+    def set_visual(self,flag=True):
         for layer in self.gpnn:
-            layer.visual=True
+            layer.visual=flag
 
 
     # node features batch frames nodes dims

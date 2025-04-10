@@ -50,18 +50,29 @@ class ReconstructLoss(Loss):
     def __init__(self,config):
         super().__init__()
         self.config=config
-        self.loss=nn.MSELoss()
+        # self.loss=nn.KLDivLoss(reduction='sum')
+        self.loss=nn.MSELoss(reduction='none')
+        self.margin=config.loss.rec.margin
+        self.max_epoch=20
+        self.max_margin=config.loss.rec.max_mar
 
-    def __call__(self,common,private):
-        loss=self.loss(common,private)
-        return loss*self.config.loss.rec,round(loss.item(),2)
+    def __call__(self,target,reconstruct,epoch):
+        # probs1=F.log_softmax(reconstruct,dim=-1)
+        # probs2=F.softmax(target,dim=-1)
+        # loss=F.relu(self.loss(probs1,probs2)-self.margin)/target.size(0)
+        margin=self.max_margin-epoch/self.max_epoch*(self.max_margin-self.margin)
+        loss=torch.mean(F.relu(torch.mean(self.loss(target,reconstruct),dim=(1,2,3))-margin))
+        return loss*self.config.loss.rec.weight,round(loss.item(),2)
 
 # batch frame nodes dims
 class SeperationLoss(Loss):
     def __init__(self,config):
         self.config=config
+        self.margin=config.loss.spe.margin
+        self.max_margin=config.loss.spe.max_mar
+        self.max_epoch=20
     
-    def __call__(self,x1,x2):
+    def __call__(self,x1,x2,epoch):
         # Subtract the mean 
         x1_mean = torch.mean(x1, (1,2,3), True)
         x1 = x1 - x1_mean
@@ -69,10 +80,12 @@ class SeperationLoss(Loss):
         x2 = x2 - x2_mean
         # print('mean',x1_mean,x2_mean)
         # Compute the cross correlation
+        margin=self.max_margin-epoch/self.max_epoch*(self.max_margin-self.margin)
+        # margin=self.margin
         sigma1 = torch.sqrt(torch.mean(x1.pow(2)))
         sigma2 = torch.sqrt(torch.mean(x2.pow(2)))
-        # corr = torch.mean(F.relu(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2)-self.config.loss.spe.margin))
-        corr=F.relu(torch.abs(torch.mean(x1*x2))/(sigma1*sigma2)-self.config.loss.spe.margin)
+        corr = torch.mean(F.relu(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2)-margin))
+        # corr=F.relu(torch.abs(torch.mean(x1*x2))/(sigma1*sigma2)-self.margin)
         # corr=torch.mean(F.relu(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2)))
         # breakpoint()
         return corr*self.config.loss.spe.weight,round(corr.item(),2)
@@ -96,13 +109,7 @@ class KLSeperation(Loss):
         cos=(1-self.loss(probs1,probs2)).mean()
         # breakpoint()
         return cos*self.config.loss.spe,round(cos.item(),3) 
-        # probs1=F.log_softmax(X1,dim=-1)
-        # probs2=F.softmax(X2,dim=-1)
-        # kl_loss=self.loss(probs1,probs2)
-        # masked_loss=(kl_loss*mask).sum()/mask.sum()
-        # # breakpoint()
-        # # print(masked_loss)
-        # return masked_loss*self.config.loss.spe,round(masked_loss.item(),3)
+
 
 class Criterion(nn.Module):
     def __init__(self,config):

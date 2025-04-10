@@ -2,28 +2,17 @@ import sys
 sys.path.append('/home/wu_tian_ci/GAFL')
 import torch.optim as optim
 import torch
-from myutils.extra_model import (MyModel,
-                                 MyModel_T,
-                                 PureT,
-                                 TextT,
-                                 MyModel_CLS,
-                                 MyModelGCN,
-                                 TextT2,
+from myutils.extra_model import (MyModelGCN,
                                  Stlt,
                                  StltImage,
-                                 MymodelGPNN,
-                                 MymodelGPNN2,
                                  MymodelGPNN3,
                                  MymodelGPNN4,
-                                 MymodelGPNN5,
                                  MymodelGPNNText,
                                  MymodelGPNN6,
-                                 MymodelGPNN7,
-                                 MymodelGPNNText2,
-                                 GPNNSeperate,
                                  GPNNMix,
                                  GPNNMix2,
                                  GPNNMix3,
+                                 GPNNMix4,
                                  PureMix)
 from myutils.mydataset import (CLIPFeatureDataset,
                                CLIPFeatureDatasetAll,
@@ -610,10 +599,10 @@ def train_rel_cls_sperate(args,pretrain):
         else:
             save_checkpoint(epoch+1,model,round(metrics['map']*100,5),optimizer,scheduler,time_stamp,'train')
 
-def load_model_dict(p,model):
+def load_model_dict(p,model,s=False):
     checkpoint=torch.load(p,'cpu')
     model_weight=checkpoint['model']
-    model.load_state_dict(model_weight,strict=False)
+    model.load_state_dict(model_weight,strict=s)
     return model
 
 
@@ -623,10 +612,10 @@ def train_oracle(args,pretrain):
     config.prompt.type=args.prompt
     test_dataset=MixAns2('test',sample_each_clip=16,train=False,mapping_type=args.ds)
     test_loader=DataLoader(test_dataset,batch_size=args.batchsize*4,num_workers=12)
-
-
     dataset=MixAns2('train',sample_each_clip=16,train=True,mapping_type=args.ds)
-    
+    if args.loss==0:
+        config.loss.spe.weight=0.
+        config.loss.rec.weight=0.
     device=args.device
     # model=MyModel(config,pretrain=pretrain).to(args.device)
     # model=MyModelGCN(config,pretrain=pretrain).to(args.device)
@@ -638,6 +627,8 @@ def train_oracle(args,pretrain):
         model=GPNNMix(config,flag=pretrain).to(device)
     elif args.model=='mix3':
         model=GPNNMix3(config,flag=pretrain,train_stage=args.stage).to(device)
+    elif args.model=='mix4':
+        model=GPNNMix4(config,flag=pretrain,train_stage=args.stage).to(device)
     else:
         raise NotImplementedError
     model.apply(weight_init)
@@ -649,7 +640,7 @@ def train_oracle(args,pretrain):
     adapter=AdapterLoss(config)
     sloss=SeperationLoss(config)
     rloss=ReconstructLoss(config)
-    sloss2=KLSeperation(config)
+
 
     parameters = add_weight_decay(model, args.decay)
     optimizer = optim.AdamW(parameters, lr=args.lr)
@@ -659,11 +650,11 @@ def train_oracle(args,pretrain):
         num_warmup_steps=args.warmup * num_batches,
         num_training_steps=args.epoch * num_batches,
     )
+    # total common private middle
     evaluator = MyEvaluatorActionGenome(len(test_dataset),157)
     evaluator2 = MyEvaluatorActionGenome(len(test_dataset),158)
     evaluator3 = MyEvaluatorActionGenome(len(test_dataset),158)
     evaluator4 = MyEvaluatorActionGenome(len(test_dataset),157)
-    evaluator4_1 = MyEvaluatorActionGenome(len(test_dataset),157)
     time_stamp=getTimeStamp()
     loss_record_path='/home/wu_tian_ci/GAFL/recoder/loss_value'
     t_path=time_stamp[0:8]
@@ -704,39 +695,29 @@ def train_oracle(args,pretrain):
                 common_label=common_label.to(device)
                 mask_=mask_.to(device)
 
-                # breakpoint()
-                if args.stage==2 :
-                    c_ans,p_ans,cls_ans,rel_ans,m_ans1,c_features,p_features,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                elif args.stage==3:
-                    ...
-
+                
+                if args.stage in [1] :
+                    c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
+                elif args.stage in [3,5]:
+                    m_ans,cls_ans,rel_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
                 else:
-                    c_ans,p_ans,cls_ans,rel_ans,m_ans1,c_features,p_features=model(frames,cls_ids,rel_l,bbx,token_tensor)
-
+                    raise NotImplementedError
                 # loss=loss1+loss2+loss3+loss4+loss5+loss6
-                if args.stage==2:
+                if args.stage in [3,5]:
+                    loss8,loss8_1=cri(m_ans,label)
+                    loss5,loss5_1,loss5_2=adapter(rel_ans,cls_ans,rel_l,cls_l,epoch+1)
+                    loss=loss8+loss5
+                elif args.stage in [1]:
+                    loss4,loss4_1=rloss(human_obj_feature,recs,epoch+1)
                     loss2,loss2_1,=cri(t_ans,label) 
-                    loss8,loss8_1=cri(m_ans1,label)
                     loss1,loss1_1=cri(c_ans,common_label)
-                    loss5,loss5_1,loss5_2=adapter(rel_ans,cls_ans,rel_l,cls_l,epoch+1)
                     loss6,loss6_1=cri(p_ans,private_label)
-                    loss3,loss3_1=sloss(c_features,p_features)
-                    loss=loss1+loss5+loss6*config.loss.pri+loss8+loss3+loss2
-                elif args.stage==3:
-                    loss2,loss2_1=cri(t_ans,label)
-                    loss=loss2
-
+                    d_weight=model.get_weight(loss6,loss1)
+                    loss5,loss5_1,loss5_2=adapter(rel_ans,cls_ans,rel_l,cls_l,epoch+1)
+                    loss3,loss3_1=sloss(c_features,p_features,epoch+1)
+                    loss=loss1+loss5+loss6*config.loss.pri*d_weight+loss2+loss3+loss4
                 else:
-                    loss8,loss8_1=cri(m_ans1,label)
-                    loss1,loss1_1=cri(c_ans,common_label)
-                    loss5,loss5_1,loss5_2=adapter(rel_ans,cls_ans,rel_l,cls_l,epoch+1)
-                    loss6,loss6_1=cri(p_ans,private_label)
-                    loss3,loss3_1=sloss(c_features,p_features)
-                    loss=loss1+loss5+loss6*config.loss.pri+loss8+loss3
-                    # loss=loss1+loss5+loss6*config.loss.pri+loss8
-                # loss=loss1+loss2+loss4+loss5+loss6*config.loss.pri
-
-                # loss=loss1+loss2+loss5
+                    raise NotImplementedError
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -745,13 +726,182 @@ def train_oracle(args,pretrain):
                 scheduler.step()
                 pbar.update(1)
 
-                if args.stage==2:
-                    loss_str=str(loss1_1)+"_"+str(loss6_1)+"_"+str(loss5_1)+"_"+str(loss5_2)+"_"+str(loss8_1)+"_"+str(loss3_1)+"_"+str(loss2_1)
-                elif args.stage==3:
-                    loss_str=str(loss2_1)
+                if args.stage in [1]:
+                    # common private rel cls sep total recs
+                    loss_str=str(loss1_1)+"_"+str(loss6_1)+"_"+str(loss5_1)+"_"+str(loss5_2)+"_"+str(loss3_1)+"_"+str(loss2_1)+"_"+str(loss4_1)
+                elif args.stage in [3,5]:
+                    loss_str=str(loss8_1)+"_"+str(loss5_2)
                 else:
-                    loss_str=str(loss1_1)+"_"+str(loss6_1)+"_"+str(loss5_1)+"_"+str(loss5_2)+"_"+str(loss8_1)+"_"+str(loss3_1)
+                    raise NotImplementedError
 
+                pbar.set_postfix({"Loss": loss_str})
+                f=open(loss_record_path,'a')
+                f.write('epoch: '+str(epoch)+' K:'+str(txt_k)+' loss :'+loss_str+ '\n')
+                f.close()
+                txt_k+=1
+        evaluator.reset()
+        evaluator2.reset()
+        evaluator3.reset()
+        evaluator4.reset()
+        model.eval()
+        with torch.no_grad():
+            for batch in tqdm(test_loader):
+                frames,bbx,mask,label,cls_ids,cls_l,rel_l,private_label,common_label,token_tensor,mask_=batch
+                frames=frames.to(device)
+                bbx=bbx.to(device)
+                mask=mask.to(device)
+                cls_l=cls_l.to(device)
+                rel_l=rel_l.to(device)
+                cls_ids=cls_ids.to(device)
+                token_tensor=token_tensor.to(device)
+                private_label=private_label.to(device)
+                common_label=common_label.to(device)
+
+                label=label.to(device).squeeze()
+                if args.stage in [1] :
+                    c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
+                elif args.stage in [3,5]:
+                    m_ans,cls_ans,rel_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
+                else:
+                    raise NotImplementedError
+                if len(label.shape)==1:
+                    label.unsqueeze_(0)
+                    common_label.unsqueeze_(0)
+                    private_label.unsqueeze_(0)
+                
+                if args.stage in [1]:
+                    evaluator.process(t_ans,label)
+                    evaluator2.process(c_ans,common_label)
+                    evaluator3.process(p_ans,private_label)
+                elif args.stage in [3,5]:
+                    evaluator4.process(m_ans,label)
+                else:
+                    raise NotImplementedError
+                
+            if args.stage in [1]:
+                metrics2 = evaluator2.evaluate()
+                metrics3 = evaluator3.evaluate()
+                metrics = evaluator.evaluate()
+            elif args.stage in [3,5]:
+                metrics4=evaluator4.evaluate()
+            else:
+                raise NotImplementedError
+            
+
+        if args.stage in [1]:
+            acc_str='t:'+str(round(metrics['map']*100,5))+'_c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))\
+
+        elif args.stage in [3,5]:
+            acc_str='o1:'+str(round(metrics4['map']*100,5))
+        else:
+            raise NotImplementedError
+        
+        save_checkpoint(epoch+1,model,acc_str,optimizer,scheduler,time_stamp,'pretrain')
+        print('saved')
+  
+def train_oracle_continue(args,pretrain,p):
+    config=load_config()
+    config.prompt.type=args.prompt
+    test_dataset=MixAns2('test',sample_each_clip=16,train=False,mapping_type=args.ds)
+    test_loader=DataLoader(test_dataset,batch_size=args.batchsize*4,num_workers=12)
+
+
+    dataset=MixAns2('train',sample_each_clip=16,train=True,mapping_type=args.ds)
+    
+    device=args.device
+    # model=MyModel(config,pretrain=pretrain).to(args.device)
+    # model=MyModelGCN(config,pretrain=pretrain).to(args.device)
+
+    # print(args.model=='mix2',args.model)
+    if args.model=='mix4':
+        model=GPNNMix4(config,flag=pretrain,train_stage=args.stage).to(device)
+    else:
+        raise NotImplementedError
+
+    # load_model_dict(p)
+    model=load_model_dict(p,model,True)
+    
+    model.apply(weight_init)
+    # breakpoint()
+    cri=Criterion(config)
+
+    # sloss2=KLSeperation(config)
+    print('lr: ',args.lr)
+    parameters = add_weight_decay(model, args.decay)
+    optimizer = optim.AdamW(parameters, lr=args.lr)
+    num_batches = len(dataset) // args.batchsize
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=int(args.wr * num_batches * args.epoch,),
+        num_training_steps=args.epoch * num_batches,
+    )
+    evaluator = MyEvaluatorActionGenome(len(test_dataset),157)
+    evaluator2 = MyEvaluatorActionGenome(len(test_dataset),158)
+    evaluator3 = MyEvaluatorActionGenome(len(test_dataset),158)
+    evaluator4 = MyEvaluatorActionGenome(len(test_dataset),157)
+    evaluator4_1 = MyEvaluatorActionGenome(len(test_dataset),157)
+    time_stamp=getTimeStamp()
+    loss_record_path='/home/wu_tian_ci/GAFL/recoder/loss_value'
+    t_path=time_stamp[0:8]
+    loss_record_path_=os.path.join(loss_record_path,t_path)
+    if not os.path.exists(loss_record_path_):
+        os.mkdir(loss_record_path_)
+    loss_record_path=os.path.join(loss_record_path_,time_stamp[8:12]+'loss.txt')
+    if not os.path.exists(loss_record_path):
+        f=open(loss_record_path,'w')
+        f.write('begin to write\n')
+        f.write(p+'continue \n')
+        f.write('lr: '+str(args.lr)+' '+'epoch:'+str(args.epoch)+' '+args.sup+'\n')
+        f.close()
+        if not os.path.exists(os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12])):
+            os.makedirs(os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12]))
+        write_config(config,args,[os.path.join(loss_record_path_,time_stamp[8:12]+'train_config_args.txt'),
+                                  os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12],
+                                               'config_args.txt')])
+    counters=0
+    for epoch in range(args.epoch):
+        model.train()
+        txt_k=1
+        train_loader=DataLoader(dataset,batch_size=args.batchsize,num_workers=12,shuffle=True)
+        with tqdm(total=len(train_loader)) as pbar:
+            for batch in train_loader:
+                counters+=1
+                frames,bbx,mask,label,cls_ids,cls_l,rel_l,private_label,common_label,token_tensor,mask_=batch
+                # breakpoint()
+                frames=frames.to(device)
+                bbx=bbx.to(device)
+                mask=mask.to(device)
+                cls_l=cls_l.to(device)
+                rel_l=rel_l.to(device)
+                label=label.to(device).squeeze()
+                cls_ids=cls_ids.to(device)
+                token_tensor=token_tensor.to(device)
+                private_label=private_label.to(device)
+                common_label=common_label.to(device)
+                mask_=mask_.to(device)
+
+                # breakpoint()
+
+                t_ans,m_ans1=model(frames,cls_ids,rel_l,bbx,token_tensor)
+
+
+                # loss=loss1+loss2+loss3+loss4+loss5+loss6
+
+                loss2,loss2_1,=cri(t_ans,label) 
+                loss8,loss8_1=cri(m_ans1,label)
+                loss=loss8+loss2
+
+
+
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_val)
+                optimizer.step()
+                scheduler.step()
+                pbar.update(1)
+
+
+                loss_str=str(loss8_1)+"_"+str(loss2_1)
                 pbar.set_postfix({"Loss": loss_str})
                 f=open(loss_record_path,'a')
                 f.write('epoch: '+str(epoch)+' K:'+str(txt_k)+' loss :'+loss_str+ '\n')
@@ -777,300 +927,31 @@ def train_oracle(args,pretrain):
                 common_label=common_label.to(device)
 
                 label=label.to(device).squeeze()
-                if args.stage==1:
-                    c_ans,p_ans,cls_ans,rel_ans,m_ans1,c_features,p_features=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                elif args.stage==2:
-                    c_ans,p_ans,cls_ans,rel_ans,m_ans1,c_features,p_features,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                else:
-                    # c_ans,p_ans,cls_ans,rel_ans,m_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                    ...
+
+                t_ans,m_ans1=model(frames,cls_ids,rel_l,bbx,token_tensor)
+                
                 if len(label.shape)==1:
                     label.unsqueeze_(0)
+                    t_ans.unsqueeze_(0)
                     common_label.unsqueeze_(0)
                     private_label.unsqueeze_(0)
-                if args.stage==2:
-                    evaluator.process(t_ans,label)
-                evaluator2.process(c_ans,common_label)
-                evaluator3.process(p_ans,private_label)
+                if len(m_ans1.shape)==1:
+                        m_ans1.unsqueeze_(0)
+
+                evaluator.process(t_ans,label)
                 evaluator4.process(m_ans1,label)
                 # evaluator4_1.process(m_ans2,label)
-            if args.stage==2:
-                metrics = evaluator.evaluate()
-            metrics2 = evaluator2.evaluate()
-            metrics3 = evaluator3.evaluate()
+
+            metrics = evaluator.evaluate()
+
             metrics4 = evaluator4.evaluate()
             # metrics4_1 = evaluator4_1.evaluate()
         # total_ans acc   common_ans acc
-        if args.stage==2:
-            acc_str='t:'+str(round(metrics['map']*100,5))+'_c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))\
-                    +'_o1:'+str(round(metrics4['map']*100,5))+'_o2:'
-        else:
-            acc_str='c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))\
-                    +'_o1:'+str(round(metrics4['map']*100,5))
-        
-        save_checkpoint(epoch+1,model,acc_str,optimizer,scheduler,time_stamp,'pretrain')
-        print('saved')
-
-        # if pretrain:
-        #     acc_str='t:'+str(round(metrics['map']*100,5))+'_c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))
-        #     save_checkpoint(epoch+1,model,acc_str,optimizer,scheduler,time_stamp,'pretrain')
-        #     print('saved')
-        # else:
-        #     save_checkpoint(epoch+1,model,round(metrics['map']*100,5),optimizer,scheduler,time_stamp,'train')
-  
-def train_oracle_continue(args,pretrain):
-    config=load_config()
-    config.prompt.type=args.prompt
-    test_dataset=MixAns2('test',sample_each_clip=16,train=False,mapping_type=args.ds)
-    test_loader=DataLoader(test_dataset,batch_size=args.batchsize*4,num_workers=12)
-
-
-    dataset=MixAns2('train',sample_each_clip=16,train=True,mapping_type=args.ds)
-    # train_loader=DataLoader(dataset,batch_size=args.batchsize,num_workers=12,shuffle=True)
-    device=args.device
-    # model=MyModel(config,pretrain=pretrain).to(args.device)
-    # model=MyModelGCN(config,pretrain=pretrain).to(args.device)
-
-    # print(args.model=='mix2',args.model)
-    if args.model=='mix2':
-        model=GPNNMix2(config,flag=pretrain).to(device)
-    elif args.model=='mix':
-        model=GPNNMix(config,flag=pretrain).to(device)
-    elif args.model=='mix3':
-        model=GPNNMix3(config,flag=pretrain,train_stage=args.stage).to(device)
-    else:
-        raise NotImplementedError
-    # model.apply(weight_init)
-    model=load_model_dict('/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250319/1503/20_c:88.3695_p:58.54179_o:59.57755.pth'
-                    ,model)
-    model.apply(weight_init)
-    cri=Criterion(config)
-    parameters = add_weight_decay(model, args.decay)
-    optimizer = optim.AdamW(parameters, lr=args.lr)
-    num_batches = len(dataset) // args.batchsize
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer,
-        num_warmup_steps=args.warmup * num_batches,
-        num_training_steps=args.epoch * num_batches,
-    )
-    evaluator = MyEvaluatorActionGenome(len(test_dataset),157)
-    evaluator2 = MyEvaluatorActionGenome(len(test_dataset),157)
-
-    time_stamp=getTimeStamp()
-    loss_record_path='/home/wu_tian_ci/GAFL/recoder/loss_value'
-    t_path=time_stamp[0:8]
-    loss_record_path_=os.path.join(loss_record_path,t_path)
-    if not os.path.exists(loss_record_path_):
-        os.mkdir(loss_record_path_)
-    loss_record_path=os.path.join(loss_record_path_,time_stamp[8:12]+'loss.txt')
-    if not os.path.exists(loss_record_path):
-        f=open(loss_record_path,'w')
-        f.write('begin to write\n')
-        f.write('lr: '+str(args.lr)+' '+'epoch:'+str(args.epoch)+' '+args.sup+'\n')
-        f.close()
-        if not os.path.exists(os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12])):
-            os.makedirs(os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12]))
-        write_config(config,args,[os.path.join(loss_record_path_,time_stamp[8:12]+'train_config_args.txt'),
-                                  os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12],
-                                               'config_args.txt')])
-    counters=0
-    for epoch in range(args.epoch):
-        model.train()
-        txt_k=1
-        train_loader=DataLoader(dataset,batch_size=args.batchsize,num_workers=12,shuffle=True)
-        with tqdm(total=len(train_loader)) as pbar:
-            for batch in train_loader:
-                counters+=1
-                frames,bbx,mask,label,cls_ids,cls_l,rel_l,private_label,common_label,token_tensor,mask_=batch
-                # breakpoint()
-                frames=frames.to(device)
-                bbx=bbx.to(device)
-                mask=mask.to(device)
-                cls_l=cls_l.to(device)
-                rel_l=rel_l.to(device)
-                label=label.to(device).squeeze()
-                cls_ids=cls_ids.to(device)
-
-                token_tensor=token_tensor.to(device)
-                private_label=private_label.to(device)
-                common_label=common_label.to(device)
-                mask_=mask_.to(device)
-
-                # breakpoint()
-
-                t_ans,m_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                loss1,loss1_1=cri(t_ans,label,5)
-                loss2,loss2_1=cri(m_ans,label,5)
-
-                loss=loss1+loss2
-
-                optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_val)
-                optimizer.step()
-                scheduler.step()
-                pbar.update(1)
-
-                loss_str=str(loss1_1)+"_"+str(loss2_1)
-
-                pbar.set_postfix({"Loss": loss_str})
-                f=open(loss_record_path,'a')
-                f.write('epoch: '+str(epoch)+' K:'+str(txt_k)+' loss :'+loss_str+ '\n')
-                f.close()
-                txt_k+=1
-        evaluator.reset()
-        evaluator2.reset()
-
-        model.eval()
-        with torch.no_grad():
-            for batch in tqdm(test_loader):
-                frames,bbx,mask,label,cls_ids,cls_l,rel_l,private_label,common_label,token_tensor,mask_=batch
-                frames=frames.to(device)
-                bbx=bbx.to(device)
-                mask=mask.to(device)
-                cls_l=cls_l.to(device)
-                rel_l=rel_l.to(device)
-                cls_ids=cls_ids.to(device)
-                token_tensor=token_tensor.to(device)
-                private_label=private_label.to(device)
-                common_label=common_label.to(device)
-
-
-                t_ans,m_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                
-                if len(label.shape)==1:
-                    label.unsqueeze_(0)
-                    common_label.unsqueeze_(0)
-                    private_label.unsqueeze_(0)
-
-
-                evaluator.process(t_ans,label)
-                evaluator2.process(m_ans,label)
-               
-
-        metrics1 = evaluator.evaluate()
-        metrics2 = evaluator2.evaluate()
-
-        acc_str='t:'+str(round(metrics1['map']*100,5))+'m:'+str(round(metrics2['map']*100,5))
-        
+ 
+        acc_str='t:'+str(round(metrics['map']*100,5))+'_o1:'+str(round(metrics4['map']*100,5))
         save_checkpoint(epoch+1,model,acc_str,optimizer,scheduler,time_stamp,'train')
         print('saved')
-  
-def train_rel_cls_sperate_multi_gpu(args,pretrain):
-    config=load_config()
-    config2=load_config('/home/wu_tian_ci/GAFL/gpnn/config/config.yaml')['params_config']
-    test_dataset=CLIPFeatureDatasetCLSREL('test',sample_each_clip=16,train=False)
-    val_dataset_sampler=SequentialDistributedSampler(test_dataset,batch_size=args.batchsize*4)
-    test_loader=DataLoader(test_dataset,batch_size=args.batchsize*4,num_workers=16,sampler=val_dataset_sampler)
 
-
-    dataset=CLIPFeatureDatasetCLSREL('train')
-    train_dataset_sampler=torch.utils.data.distributed.DistributedSampler(dataset)
-    train_loader=DataLoader(dataset,batch_size=args.batchsize,num_workers=12,sampler=train_dataset_sampler,)
-    # device=args.device
-    # model=MyModel(config,pretrain=pretrain).to(args.device)
-    # model=MyModelGCN(config,pretrain=pretrain).to(args.device)
-    torch.distributed.init_process_group("nccl")
-    if 'LOCAL_RANK' not in os.environ:
-        os.environ['LOCAL_RANK']=str(args.local_rank)
-    rank, world_size = torch.distributed.get_rank(), torch.distributed.get_world_size()
-    # local_rank = rank % torch.cuda.device_count()
-    local_rank=args.local_rank
-    device = torch.device(local_rank)
-
-
-    model=MymodelGPNN4(config,config2,pretrain=pretrain).to(args.device)
-    model.apply(weight_init)
-
-
-    cri=Criterion(config)
-    adapter=AdapterLoss(config)
-    sloss=SeperationLoss(config)
-    rloss=ReconstructLoss(config)
-
-    parameters = add_weight_decay(model, args.decay)
-    optimizer = optim.AdamW(parameters, lr=args.lr)
-    num_batches = len(dataset) // args.batchsize
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer,
-        num_warmup_steps=args.warmup * num_batches,
-        num_training_steps=args.epoch * num_batches,
-    )
-    evaluator = MyEvaluatorActionGenome(len(test_dataset),157)
-    time_stamp=getTimeStamp()
-    loss_record_path='/home/wu_tian_ci/GAFL/recoder/loss_value'
-    t_path=time_stamp[0:8]
-    loss_record_path=os.path.join(loss_record_path,t_path)
-    if not os.path.exists(loss_record_path):
-        os.mkdir(loss_record_path)
-    loss_record_path=os.path.join(loss_record_path,time_stamp[8:12]+'loss.txt')
-    if not os.path.exists(loss_record_path):
-        f=open(loss_record_path,'w')
-        f.write('begin to write\n')
-        f.write('lr: '+str(args.lr)+' '+'epoch:'+str(args.epoch)+' '+args.sup+'\n')
-        f.close()
-
-    for epoch in range(args.epoch):
-        model.train()
-        txt_k=1
-        with tqdm(total=len(train_loader)) as pbar:
-            for batch in train_loader:
-                frames,bbx,mask,label,cls_l,rel_l=batch
-                frames=frames.to(device)
-                bbx=bbx.to(device)
-                mask=mask.to(device)
-                cls_l=cls_l.to(device)
-                rel_l=rel_l.to(device)
-                label=label.to(device).squeeze()
-                ans_common,common_features,private_features,reconstruct_features,target_features,\
-                ans_all,rel,cls,rel_label,cls_label=model(frames,mask,bbx,rel_l,cls_l)
-                if label.shape==(1,):
-                    label.unsqueeze_(0)
-                
-                # action cls common
-                loss1,loss1_1=cri(ans_common,label)
-                # action cls common+private
-                loss2,loss2_1=cri(ans_all,label)
-                # sperate
-                loss3,loss3_1=sloss(common_features,private_features)
-                # reconstruct loss
-                loss4,loss4_1=rloss(reconstruct_features,target_features)
-                # weighted relation obj_class
-                loss5,loss5_1,loss5_2=adapter(rel,cls,rel_label,cls_label)
-
-                loss=loss1+loss2+loss3+loss4+loss5
-                optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_val)
-                optimizer.step()
-                scheduler.step()
-                pbar.update(1)
-                loss_str=str(loss1_1)+'_'+str(loss2_1)+'_'+str(loss3_1)+'_'+str(loss4_1)+'_'+str(loss5_1)+'_'+str(loss5_2)
-                pbar.set_postfix({"Loss": loss_str})
-                f=open(loss_record_path,'a')
-                f.write('epoch: '+str(epoch)+' K:'+str(txt_k)+' loss rel cls:'+loss_str+ '\n')
-                f.close()
-                txt_k+=1
-        evaluator.reset()
-        model.eval()
-        with torch.no_grad():
-            for batch in tqdm(test_loader):
-                frames,bbx,mask,label,cls_l,rel_l=batch
-                frames=frames.to(device)
-                bbx=bbx.to(device)
-                mask=mask.to(device)
-                cls_l=cls_l.to(device)
-                rel_l=rel_l.to(device)
-                label=label.to(device).squeeze()
-                ans,rel,cls,rel_label,cls_label=model(frames,mask,bbx,rel_l,cls_l)
-                evaluator.process(ans,label)
-            metrics = evaluator.evaluate()
-
-        if pretrain:
-            save_checkpoint(epoch+1,model,round(metrics['map']*100,5),optimizer,scheduler,time_stamp,'pretrain')
-            print('saved')
-        else:
-            save_checkpoint(epoch+1,model,round(metrics['map']*100,5),optimizer,scheduler,time_stamp,'train')
 
 def train_clip_stlt(args):
     config=load_config()
@@ -1499,15 +1380,21 @@ if __name__=='__main__':
             help="The gradient clipping value.",
         )
     parser.add_argument(
+            "--wr",
+            type=float,
+            default=.1,
+            help="warm up rate for continue",
+        )
+    parser.add_argument(
         "--model",
         type=str,
-        default="mix3",
+        default="mix4",
         help="model",
     )
     parser.add_argument(
         "--ds",
         type=int,
-        default=2,
+        default=5,
         help="dataset",
     )
     parser.add_argument(
@@ -1528,17 +1415,23 @@ if __name__=='__main__':
         default=1,
         help="prompt type 0:smiple 1:gpfp",
     )
+    parser.add_argument(
+        "--loss",
+        type=int,
+        default=1,
+        help="speration and reconstruction loss,0 no loss,1 loss",
+    )
 
 
     set_seed(seed=3407)
     args = parser.parse_args()
     # train(args,True
-    if args.tp==2:
-        train_pure(args,False)
-    elif args.tp ==0:
+    if args.tp ==0:
         train_oracle(args,False)
     elif args.tp==1:
-        train_oracle_continue(args,False)
+        # p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250327/1238/20_t:61.87185_c:88.61021_p:58.9198_o1:59.48385.pth'
+        p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250407/1849/20_t:56.0987_c:98.34421_p:53.22037.pth'
+        train_oracle_continue(args,False,p)
     else:
         raise NotImplementedError
     # train_text2(args) 

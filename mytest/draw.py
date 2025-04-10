@@ -47,6 +47,31 @@ def draw_list(p,name):
         '/home/wu_tian_ci/GAFL/test',
         name
     ))
+
+
+
+def draw_list_multi(ys,x,name,names):
+    t=0
+    co=['r','g','b','y']
+    for y in ys:
+        plt.plot(x,y,marker='s', linestyle='--', color=co[t], label=names[t])
+        t+=1
+
+    # 添加标题和标签
+    plt.xticks(x) 
+    plt.title('mAP')
+    plt.xlabel('X')
+    plt.ylabel('Y')
+
+    # 添加图例
+    plt.legend()
+
+    plt.savefig(os.path.join(
+        '/home/wu_tian_ci/GAFL/mytest',
+        name
+    ))
+
+
 if __name__=='__main__':
     p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250310/1934'
     draw_list(p,'train')

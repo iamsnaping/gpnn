@@ -21,6 +21,9 @@ from tqdm import tqdm
 from PIL import Image
 import h5py
 import random
+import sys
+sys.path.append('/home/wu_tian_ci/GAFL')
+from mytest.draw import draw_list_multi
 # def get_cls_num():
 #     base_path='/home/wu_tian_ci/GAFL/data/action_genome/object_classes.txt'
 #     f=open(base_path,'r')
@@ -34,6 +37,16 @@ import random
 #         count+=1
 
 #     return cls_num
+from torch.utils.data import Dataset
+
+
+
+
+def set_seed(seed=3407):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed) 
 
 def get_cls_num():
     cls_num={
@@ -260,8 +273,8 @@ def process_img(img,bbx_list,mask_list,preprocess):
             tmp_list[i]=preprocess(img.crop(bbx_list[i]))
     return tmp_list
 
-def process_img_all(img,bbx_list,mask_list,preprocess):
-    tmp_list=torch.zeros(11,3,224,224)
+def process_img_all(img,bbx_list,mask_list,preprocess,device=''):
+    tmp_list=torch.zeros(11,3,224,224).to(device)
     tmp_list[0]=preprocess(img)
     for i in range(len(mask_list)):
         if mask_list[i]==1:
@@ -610,8 +623,6 @@ def cls_process(name):
     print('zero_keys',len(count_zero_dict.keys()))
     # for key in count_zero_dict.keys():
     #     print(key)
-
-
 
 def print_box():
     key='AHLVF.mp4'
@@ -970,6 +981,70 @@ def pkl_process_all_cls_rel(name,device):
 
     hf.close()
 
+
+def pkl_process_all_cls_rel_shift(name,device):
+    # skip_videos=['R4SJJ.mp4',
+    #              'FC2SK.mp4',
+    #              'C10FA.mp4',
+    #              'X2LBW.mp4',
+    #              'OZIJ7.mp4',
+    #              'LKH9A.mp4']
+    hdf5_path=os.path.join('/home/wu_tian_ci/GAFL/data/hdf5/all_cls_rel/shift',name+'.hdf5')
+    img_basepath='/home/wu_tian_ci/revisiting-spatial-temporal-layouts/data/action_genome/frames'
+    device=device
+    model,preprocess=clip.load('ViT-B/16',device=device,jit=True)
+    json_name=json.load(open(os.path.join('/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel/shift',name+'.json'),'r'))
+
+    bbx_path=os.path.join('/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel/shift',name+'_bbx.json')
+    mask_path=os.path.join('/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel/shift',name+'_mask.json')
+    bbx_json=json.load(open(bbx_path,'r'))
+    mask_json=json.load(open(mask_path,'r'))
+    print(name,'keys',len(json_name.keys()))
+    all_keys=json_name.keys()
+    file_keys=[item for item in all_keys if 'label' not in item]
+    label_keys=[i for i in all_keys if 'label' in i]
+    assert len(file_keys) == len(label_keys)
+    hf=h5py.File(hdf5_path, "a", swmr=True)
+    FLAG_TENSOR=torch.tensor([False]).to(device)
+    with torch.no_grad():
+        for key in tqdm(file_keys):
+            frames_ids=json_name[key]
+            masks_list=mask_json[key]
+            bbxes_list=bbx_json[key]
+            grp=hf.create_group(key)
+            feature_list=[]
+            tmp_lists=[]
+            mask_lists=[]
+            frameid_list=[]
+            for idx,(frame_id,mask_list,bbx_list) in enumerate(zip(frames_ids,masks_list,bbxes_list),start=1):
+
+                img=Image.open(os.path.join(img_basepath,key,frame_id))
+                # tmp_list=process_img_all(img,bbx_list,mask_list,preprocess)
+
+                try:
+                    tmp_list=process_img_all(img,bbx_list,mask_list,preprocess,device)
+                except:
+                    print(key,frame_id,bbx_list,len(mask_list),len(bbx_list))
+                    # breakpoint()
+                tmp_lists.append(tmp_list)
+                mask_lists.append([1]+mask_list)
+                frameid_list.append(frame_id)
+                if idx%32==0 or (idx==len(frames_ids)):
+                    tmp_list_device=torch.cat(tmp_lists,dim=0).to(device)
+                    tmp_feature=model.encode_image(tmp_list_device).to(device)
+                    mask_list_device=~torch.tensor(mask_lists,dtype=torch.bool,device=device).reshape(-1)
+                    tmp_feature[mask_list_device]=torch.zeros_like(tmp_feature[mask_list_device],device=device)
+                    assert mask_list_device[0]==FLAG_TENSOR
+                    feature_list=tmp_feature.cpu().detach().numpy()
+                    for ids,frameid in enumerate(frameid_list,start=0):
+                        grp.create_dataset(frameid, data=feature_list[ids*11:(ids+1)*11])
+                    tmp_lists=[]
+                    mask_lists=[]
+                    frameid_list=[]
+
+        hf.close()
+
+
 def trans_all(csv_name,file_path):
     except_list=['R4SJJ.mp4',
                  'FC2SK.mp4',
@@ -1043,7 +1118,136 @@ def trans_all(csv_name,file_path):
         frames_dict[video_id]=frames_list
         frames_dict[video_id+'_label']=all_classes
     json.dump(frames_dict,open(json_savepath,'w'))
-    
+
+# trans all from the 'trans' jsonfile
+def trans_all_json():
+    except_list=['R4SJJ.mp4',
+                 'FC2SK.mp4',
+                 'C10FA.mp4',
+                 'X2LBW.mp4',
+                 'OZIJ7.mp4',
+                 'LKH9A.mp4']
+    except_name=','.join(except_list)
+    file_dict=get_dict()
+    zero_dict=get_frame_dict()
+    trans_base='/home/wu_tian_ci/GAFL/data/trans'
+    trans_train_paths=[os.path.join(trans_base,'train_'+str(i)+'.json') for i in range(1,6)]
+    trans_test_paths=[os.path.join(trans_base,'test_'+str(i)+'.json') for i in range(1,6)]
+    train_keys=[]
+    test_keys=[]
+    for test_path,train_path in zip(trans_train_paths,trans_test_paths):
+        test_json=json.load(open(test_path,'r'))
+        train_json=json.load(open(train_path,'r'))
+        train_keys.append(train_json.keys())
+        test_keys.append(test_json.keys())
+
+    trans_json_path=[]
+    json_save_base='GAFL/json_dataset/all/shift'
+
+    anno_basepath='/home/wu_tian_ci/revisiting-spatial-temporal-layouts/data/action_genome/frames'
+
+    test_csv_path='/home/wu_tian_ci/revisiting-spatial-temporal-layouts/data/Charades/Charades_v1_test.csv'
+
+    train_csv_path='/home/wu_tian_ci/revisiting-spatial-temporal-layouts/data/Charades/Charades_v1_train.csv'
+    test_df=pd.read_csv(test_csv_path)
+    train_df=pd.read_csv(train_csv_path)
+    test_save_path=[os.path.join('/home/wu_tian_ci/GAFL/json_dataset/all/shift','test'+str(i)+'.json') for i in range(1,6)]
+    train_save_path=[os.path.join('/home/wu_tian_ci/GAFL/json_dataset/all/shift','train'+str(i)+'.json') for i in range(1,6)]
+    # video length
+    test_lengths=test_df['length']
+    # class
+    test_actions=test_df['actions']
+    # video id
+    test_ids=test_df['id']
+
+
+
+    train_lengths=train_df['length']
+    # class
+    train_actions=train_df['actions']
+    # video id
+    train_ids=train_df['id']
+
+    pattern2 = r'c\d{3}'
+
+
+
+
+    train_frames_dicts=[{} for i in range(5)]
+    test_frames_dicts=[{} for i in range(5)]
+
+
+    for _,l,a in tqdm(zip(test_ids,test_lengths,test_actions)):
+        if _ in except_name:
+            print(_)
+            continue
+        if file_dict.get(_) is None:
+            continue
+        try:
+            all_classes=re.findall(pattern2,a)
+        except:
+            continue
+
+        all_classes=[x[1:] for x in all_classes]
+
+        video_id=_+'.mp4'
+        filter_id=os.path.join(anno_basepath,video_id)
+        try:
+            filter_frames=os.listdir(filter_id)
+        except:
+            continue
+        int_filter=natsorted(filter_frames)
+        frames_list=[]
+        for frame_id in int_filter:
+            key=video_id+'/'+frame_id
+            if zero_dict.get(key) is not None:
+                continue
+            frames_list.append(frame_id)
+        for i in range(5):
+            if _ in train_keys[i]:
+                train_frames_dicts[i][video_id]=frames_list
+                train_frames_dicts[i][video_id+'_label']=all_classes
+            if _ in test_keys[i]:
+                test_frames_dicts[i][video_id]=frames_list
+                test_frames_dicts[i][video_id+'_label']=all_classes
+    for _,l,a in tqdm(zip(train_ids,train_lengths,train_actions)):
+        if _ in except_name:
+            print(_)
+            continue
+        if file_dict.get(_) is None:
+            continue
+        try:
+            all_classes=re.findall(pattern2,a)
+        except:
+            continue
+
+        all_classes=[x[1:] for x in all_classes]
+
+        video_id=_+'.mp4'
+        filter_id=os.path.join(anno_basepath,video_id)
+        try:
+            filter_frames=os.listdir(filter_id)
+        except:
+            continue
+        int_filter=natsorted(filter_frames)
+        frames_list=[]
+        for frame_id in int_filter:
+            key=video_id+'/'+frame_id
+            if zero_dict.get(key) is not None:
+                continue
+            frames_list.append(frame_id)
+        for i in range(5):
+            if _ in train_keys[i]:
+                train_frames_dicts[i][video_id]=frames_list
+                train_frames_dicts[i][video_id+'_label']=all_classes
+            if _ in test_keys[i]:
+                test_frames_dicts[i][video_id]=frames_list
+                test_frames_dicts[i][video_id+'_label']=all_classes
+    for i in range(5):
+        json.dump(train_frames_dicts[i],open(train_save_path[i],'w'))
+        json.dump(test_frames_dicts[i],open(test_save_path[i],'w'))
+   
+
 def generate_bbx_mask(name):
     json_path=os.path.join('/home/wu_tian_ci/GAFL/json_dataset/all',name+'.json')
     json_file=json.load(open(json_path,'r'))
@@ -1303,6 +1507,160 @@ def generate_bbx_mask_cls_rel(name):
     print(out_box_count)
 
 
+def generate_bbx_mask_cls_rel_shift(name):
+    video2size=json.load(open('/home/wu_tian_ci/revisiting-spatial-temporal-layouts/data/video2size/ag.json','r'))
+    json_path=os.path.join('/home/wu_tian_ci/GAFL/json_dataset/all/shift',name+'.json')
+    json_file=json.load(open(json_path,'r'))
+    keys=json_file.keys()
+    base_path='/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel/shift'
+    object_bbox= pickle.load(
+        open('/home/wu_tian_ci/revisiting-spatial-temporal-layouts/data/action_genome/object_bbox_and_relationship.pkl',"rb")
+    )
+    person_bbox = pickle.load(
+        open('/home/wu_tian_ci/GAFL/data/action_genome/person_bbox.pkl', "rb")
+    )
+    '''
+    video_id:[[[x1,y1,x2,y2],...,[x1,y1,x1,y1]],
+    [[x1,y1,x2,y2],...,[x1,y1,x1,y1]]](10 bbxes for every frames)
+    '''
+    bbx_dict={}
+    '''
+    video_id:[[0,0,1,...,1],...,[0,0,1,1,...,0]](10 objs)
+    '''
+    mask_dict={}
+
+    '''
+    video_id[[cls1,cls2,cls3,cls4...],[...]](10objs)
+    '''
+    obj_cls_dict={}
+    '''
+    video_id:[[rel1,rel2...],[]] 10 objs
+    '''
+    rel_dict={}
+    cls_num=get_cls_num()
+    people_flag,rel_count=False,0
+    out_box_count=0
+    for key in tqdm(keys):
+        if 'label' in key:
+            continue
+        frame_ids=json_file[key]
+        cls_list=[]
+        people_flag_=False
+        for frame_id in frame_ids:
+            vf_id=key+'/'+frame_id
+            objs=object_bbox[vf_id]
+            for obj in objs:
+                if not obj['visible']:
+                        continue
+                cls_list.append(cls_num[obj['class']])
+            if person_bbox[vf_id]['bbox'].shape == (1,4):
+                cls_list.append(cls_num['person'])
+                people_flag_=True
+        if not people_flag_:
+            people_flag=True
+        cls_list=np.unique(cls_list).tolist()
+        cls_list.sort()
+        cls_list.reverse()
+        video_bbx_list=[]
+        vidoe_mask_list=[]
+        video_obj_cls_list=[]
+        vidoe_rel_list=[]
+        frames_len=len(frame_ids)
+        for frame_id in frame_ids:
+            vf_id=key+'/'+frame_id
+            objs=object_bbox[vf_id]
+            frame_bbx_dict={}
+            frame_rel_dict={}
+            mask_list=[]
+            rel_list=[]
+            bbx_list=[]
+            obj_cls_list=[]
+            person_flag=False
+            for obj in objs:
+                if not obj['visible']:
+                    continue
+                frame_bbx_dict[cls_num[obj['class']]]=obj['bbox']
+                frame_rel_dict[cls_num[obj['class']]]=get_relation(obj['attention_relationship'],obj['spatial_relationship'],obj['contacting_relationship'])
+
+            if person_bbox[vf_id]['bbox'].shape == (1,4):
+                person_flag=True
+                frame_bbx_dict[cls_num['person']]=person_bbox[vf_id]['bbox']
+                frame_rel_dict[cls_num['person']]=[0]
+            for cls in cls_list:
+                if frame_bbx_dict.get(cls) is None:
+                    mask_list.append(0)
+                    bbx_list.append([0.,0.,0.,0.])
+                    obj_cls_list.append(0)
+                    rel_list.append([0])
+                    continue
+                bbx=frame_bbx_dict[cls]
+                if type(bbx) == np.ndarray:
+                    bbx=bbx.squeeze()
+                    bbx=[float(bbx[0]),float(bbx[1]),float(bbx[2]),float(bbx[3])]
+                else:
+                    bbx=list(bbx)
+                mask_list.append(1)
+                bbx_list.append(bbx)
+                obj_cls_list.append(cls)
+                rel_list.append(frame_rel_dict[cls])
+            if len(bbx_list) != len(mask_list):
+                breakpoint()
+            if len(bbx_list)>10 or len(mask_list)>10:
+                print(key,frame_id)
+            if not people_flag_:
+                bbx_list.insert(0,[0.,0.,0.,0.])
+                mask_list.insert(0,0)
+                obj_cls_list.insert(0,0)
+                rel_list.insert(0,[0])
+            if len(bbx_list)>10:
+                print(bbx_list,key,cls_list)
+            assert len(bbx_list) <= 10
+            assert len(mask_list) <= 10
+            assert len(obj_cls_list) <= 10
+            assert len(bbx_list)==len(rel_list)
+            bbx_list=bbx_list+[[0.,0.,0.,0.]]*(10-len(bbx_list))
+            mask_list=mask_list+[0]*(10-len(mask_list))
+            obj_cls_list=obj_cls_list+[0]*(10-len(obj_cls_list))
+            rel_list=rel_list+[[0]]*(10-len(rel_list))
+
+            new_bbx=[[x[0],x[1],x[2]+x[0],x[3]+x[1]] for x in bbx_list]
+            # for bx in new_bbx:
+            #     if (bx[0]>bx[2]) or (bx[1]>bx[3]):
+            #         breakpoint()
+            # if key=='1K0SU.mp4':
+            #     print(new_bbx)
+            #     breakpoint()
+            if person_flag: 
+                new_bbx[0]=dp(bbx_list[0])
+            
+            video_size=video2size[key.split('.')[0]]
+            new_bbx2=[extend_bbx(bx,mk,video_size) for bx,mk in zip(new_bbx,mask_list)]
+            video_bbx_list.append(new_bbx2)
+            vidoe_mask_list.append(mask_list)
+            video_obj_cls_list.append(obj_cls_list)
+            vidoe_rel_list.append(rel_list)
+            for bx in new_bbx2:
+                if (bx[0]>bx[2]) or (bx[1]>bx[3]):
+                    print(key,frame_id,obj_cls_list,new_bbx2)
+                    out_box_count+=1
+        if frames_len!=len(video_bbx_list) or frames_len!=len(vidoe_mask_list):
+            breakpoint()
+
+        bbx_dict[key]=video_bbx_list
+        mask_dict[key]=vidoe_mask_list
+        obj_cls_dict[key]=video_obj_cls_list
+        rel_dict[key]=vidoe_rel_list
+    mask_path=os.path.join(base_path,name+'_mask.json')
+    bbx_path=os.path.join(base_path,name+'_bbx.json')
+    obj_cls_path=os.path.join(base_path,name+'_obj_cls.json')
+    rel_path=os.path.join(base_path,name+'_rel.json')
+    json.dump(mask_dict,open(mask_path,'w'))
+    json.dump(bbx_dict,open(bbx_path,'w'))
+    json.dump(obj_cls_dict,open(obj_cls_path,'w'))
+    json.dump(rel_dict,open(rel_path,'w'))
+    print(out_box_count)
+
+
 # mapping table 
 
 '''
@@ -1332,6 +1690,9 @@ def get_sperate_labels(name,labels,full_list):
         t_list=random.sample(token_list,i)
         t_set=set(t_list)
         p_list=list(token_set-t_set)
+        if i == list_len:
+            p_list=[157]
+        
         label_list.append({
             'id':name,
             'token':t_list,
@@ -1340,6 +1701,112 @@ def get_sperate_labels(name,labels,full_list):
         })
     return label_list
 
+
+def get_sperate_labels2(name,labels,full_list):
+    labels=list(set(labels))
+    token_list=[int(i) for i in labels]
+
+    contra_set=set(full_list)-set(token_list)
+
+    token_set=set(token_list)
+    contra_list=list(contra_set)
+    
+    list_len=len(token_list)
+
+    # random_l=random.sample(contra_list,1)
+    label_list=[]
+    for i in range(1,list_len+1):
+        t_list=random.sample(token_list,i)
+        t_set=set(t_list)
+        p_list=list(token_set-t_set)
+        if i==list_len:
+            p_list=[157]
+        # all right
+        label_list.append({
+            'id':name,
+            'token':t_list,
+            'private':p_list,
+            'common':t_list
+        })
+        # all wrong
+        t_list=random.sample(contra_list,i)
+        label_list.append({
+            'id':name,
+            'token':t_list,
+            'private':token_list[:],
+            'common':[157]
+        })
+    return label_list
+
+# flag true -> all right token 
+def get_sperate_labels3(name,labels,full_list,flag=False):
+    labels=list(set(labels))
+    token_list=[int(i) for i in labels]
+
+    contra_set=set(full_list)-set(token_list)
+
+    token_set=set(token_list)
+    contra_list=list(contra_set)
+    
+    list_len=len(token_list)
+
+    # random_l=random.sample(contra_list,1)
+    label_list=[]
+    for i in range(1,list_len+1):
+        t_list=random.sample(token_list,i)
+        t_set=set(t_list)
+        p_list=list(token_set-t_set)
+        if i==list_len:
+            p_list=[157]
+        # all right
+        if flag:
+            label_list.append({
+                'id':name,
+                'token':t_list,
+                'private':p_list,
+                'common':t_list
+            })
+        # all wrong
+        else:
+            t_list=random.sample(contra_list,i)
+            label_list.append({
+                'id':name,
+                'token':t_list,
+                'private':token_list[:],
+                'common':[157]
+            })
+    return label_list
+
+# padding to 16 tokens
+def get_sperate_labels4(name,labels,full_list):
+    labels=list(set(labels))
+    token_list=[int(i) for i in labels]
+
+    contra_set=set(full_list)-set(token_list)
+
+    token_set=set(token_list)
+    contra_list=list(contra_set)
+    
+    list_len=len(token_list)
+    max_labels=16
+
+    label_list=[]
+    for i in range(1,list_len+1):
+        t_list=random.sample(token_list,i)
+        
+        t_list_con=random.sample(contra_list,max_labels-i)
+        t_list_token=t_list+t_list_con
+        t_set=set(t_list)
+        p_list=list(token_set-t_set)
+        if len(p_list)==0:
+            p_list=[157]
+        label_list.append({
+            'id':name,
+            'token':t_list_token,
+            'private':p_list,
+            'common':t_list
+        })
+    return label_list
 
 def get_sperate_labels_expand(name,labels,full_list):
     labels=list(set(labels))
@@ -1375,47 +1842,41 @@ def get_sperate_labels_expand(name,labels,full_list):
 def get_sperate_labels_constrain(name,labels,full_list,sample_tokens,padding):
     labels=list(labels)
     token_list=[int(i) for i in labels]
-
+    # labels_len=len(labels)
     contra_set=set(full_list)-set(token_list)
 
     token_set=set(token_list)
     contra_list=list(contra_set)
+
     max_labels=16
-    random_l=random.sample(contra_list,max_labels)
     if sample_tokens==0:
-        return {'id':name,'token':random_l,'common':[157],'private':token_list}
-    if sample_tokens==max_labels:
+        if padding:
+            return {'id':name,'token':random.sample(contra_list,max_labels),'private':token_list,'common':[157]}
+        else:
+            return {'id':name,'token':random.sample(contra_list,1),'private':token_list,'common':[157]}
+    if sample_tokens==16:
         return {'id':name,'token':token_list,'private':[157],'common':token_list}
-    # label_list=[{'id':name,'token':e_token_list,'private':[157],'common':token_list},
-    #             {'id':name,'token':random_l,'common':[157],'private':token_list}]
-    
 
-    t_list=random.sample(token_list,sample_tokens)
-    t_list_token=dp(t_list)
+    token_ans=random.sample(token_list,sample_tokens)
+    token_=dp(token_ans)
+    p_token=list(token_set-set(token_ans))
+    if len(p_token)==0:
+        p_token=[157]
     if padding:
-        t_list_con=random.sample(contra_list,max_labels-sample_tokens)
-        t_list_token=t_list+t_list_con
-    t_set=set(t_list)
-    p_list=list(token_set-t_set)    
-    if len(p_list)==0:
-        p_list=[157]
-    if len(t_list)==0:
-        t_list=[157]
-    return {
-            'id':name,
-            'token':t_list_token,
-            'private':p_list,
-            'common':t_list
-        }
+        token_=token_+random.sample(contra_list,max_labels-sample_tokens)
+    
+    return {'id':name,'token':token_,'private':p_token,'common':token_ans}
 
-
-def mapping_table(name):
+def mapping_table(name,label_type=1):
     full_list=[i for i in range(157)]
     json_file=json.load(
             open(os.path.join("/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel",name+'.json'),'r')
         )
     keys=list(json_file.keys())
-    json_save_path=os.path.join('/home/wu_tian_ci/GAFL/json_dataset/mapping',name+'.json')
+    if label_type==1:
+        json_save_path=os.path.join('/home/wu_tian_ci/GAFL/json_dataset/mapping',name+'.json')
+    else:
+        json_save_path=os.path.join('/home/wu_tian_ci/GAFL/json_dataset/mapping2',name+'.json')
     # key2=list(json_file2.keys())
     json_keys=[item for item in keys if 'label' not in item]
     ans_list=[]
@@ -1424,12 +1885,129 @@ def mapping_table(name):
         label_name=k+'_label'
         json_set=set(json_file[label_name])
         len_a.append(len(list(json_set)))
-        l=get_sperate_labels(k,json_file[label_name],full_list)
+        if len(json_set)>16:
+            continue
+        if label_type==1:
+            l=get_sperate_labels(k,json_file[label_name],full_list)
+        else:
+            l=get_sperate_labels2(k,json_file[label_name],full_list)
         ans_list.extend(l)
     print(name,':',len(ans_list),' ',len(keys),' ',np.mean(len_a),' ',np.sum(len_a),' ',len(len_a))
     json.dump(ans_list,open(json_save_path,'w'))
 
+def mapping_table_test(name,label_type=1):
+    full_list=[i for i in range(157)]
+    json_file=json.load(
+            open(os.path.join("/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel",name+'.json'),'r')
+        )
+    keys=list(json_file.keys())
+    json_save_pathss=[[['' for j in range(i+1)] for i in range(16)] for i in range(3)]
+    json_save_paths=[['' for j in range(i+1)] for i in range(16)]
+    jsp_=''
+    ans_list=[[[] for j in range(i+1)] for i in range(16)]
+    ans_=[]
+    if label_type==4:
+        ans_list=[[[[] for j in range(i+1)] for i in range(16)],
+                  [[[] for j in range(i+1)] for i in range(16)],
+                  [[[] for j in range(i+1)] for i in range(16)]]
+    if label_type==1:
+        json_base_path='/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_1'
+    elif label_type==2:
+        json_base_path='/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_2'
+    elif label_type==3:
+        json_base_path='/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_3'
+    elif label_type==4:
+        json_base_paths=[
+            '/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_1',
+            '/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_2',
+            '/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_3'
+        ]
+    elif label_type ==5:
+        json_base_path='/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_4'
+    elif label_type ==6:
+        json_base_path='/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_5'
+    else:
+        raise NotImplementedError
+    if label_type in [1,2,3,5]:
+        for i in range(1,17):
+            for j in range(1,i+1):
+                c_dir=os.path.join(json_base_path,str(i),str(j))
+                if not os.path.exists(c_dir):
+                    os.makedirs(c_dir)
+                json_save_paths[i-1][j-1]=os.path.join(c_dir,name+'.json')
+    elif label_type in [6]:
+        if not os.path.exists(json_base_path):
+            os.makedirs(json_base_path)
+        jsp_=os.path.join(json_base_path,name+'.json')
+    elif label_type in [4]:
+        for i in range(1,17):
+            for j in range(1,i+1):
+                    for k in range(3):
+                        c_dir=os.path.join(json_base_paths[k],str(i),str(j))
+                        if not os.path.exists(c_dir):
+                            os.makedirs(c_dir)
+                        json_save_pathss[k][i-1][j-1]=os.path.join(c_dir,name+'.json')
+    
+    json_keys=[item for item in keys if 'label' not in item]
+    len_a=[]
+    for k in tqdm(json_keys):
+        label_name=k+'_label'
+        json_set=set(json_file[label_name])
+        len_a.append(len(list(json_set)))
+        tokens_len=len(json_set)
+        if len(json_set)>16:
+            continue
 
+
+        if label_type==1:
+            l=get_sperate_labels3(k,json_file[label_name],full_list,True)
+        elif label_type==2:
+            l=get_sperate_labels3(k,json_file[label_name],full_list,False)
+        elif label_type==3:
+            l1=get_sperate_labels3(k,json_file[label_name],full_list,True)
+            l2=get_sperate_labels3(k,json_file[label_name],full_list,False)
+        elif label_type==4:
+            l1=get_sperate_labels3(k,json_file[label_name],full_list,True)
+            l2=get_sperate_labels3(k,json_file[label_name],full_list,False)
+        elif label_type==5:
+            l=get_sperate_labels4(k,json_file[label_name],full_list)
+        elif label_type==6:
+            l1=get_sperate_labels3(k,json_file[label_name],full_list,True)
+            l2=get_sperate_labels3(k,json_file[label_name],full_list,False)
+            l3=get_sperate_labels4(k,json_file[label_name],full_list)
+        else:
+            raise NotImplementedError
+        # breakpoint()
+        for i in range(tokens_len):
+            if label_type in [1,2,5]:
+                ans_list[tokens_len-1][i].append(l[i])
+            elif label_type in [3]:
+                ans_list[tokens_len-1][i].append(l1[i])
+                ans_list[tokens_len-1][i].append(l2[i])
+            elif label_type in [4]:
+                ans_list[0][tokens_len-1][i].append(l1[i])
+                ans_list[1][tokens_len-1][i].append(l2[i])
+                ans_list[2][tokens_len-1][i].append(l1[i])
+                ans_list[2][tokens_len-1][i].append(l2[i])
+            elif label_type in [6]:
+                ans_.append(l1[i])
+                ans_.append(l2[i])
+                ans_.append(l3[i])
+    # print(name,':',len(ans_list),' ',len(keys),' ',np.mean(len_a),' ',np.sum(len_a),' ',len(len_a))
+    if label_type in [1,2,3,5]:
+        for i in range(16):
+            for j in range(i+1):
+                # breakpoint()
+                json.dump(ans_list[i][j],open(json_save_paths[i][j],'w'))
+    elif label_type in [4]:
+        for i in range(16):
+            for j in range(i+1):
+                # breakpoint()
+                json.dump(ans_list[0][i][j],open(json_save_pathss[0][i][j],'w'))
+                json.dump(ans_list[1][i][j],open(json_save_pathss[1][i][j],'w'))
+                json.dump(ans_list[2][i][j],open(json_save_pathss[2][i][j],'w'))
+    elif label_type in [6]:
+        json.dump(ans_,open(jsp_,'w'))
 
 def tally_label(name):
     full_list=[i for i in range(157)]
@@ -1454,7 +2032,6 @@ def tally_label(name):
     sum_len=sum(len_a)
     for i in range(28):
         print(round(len_label[i]/sum_len,2),end=' ')
-
 
 def mapping_table_expand(name):
     full_list=[i for i in range(157)]
@@ -1527,6 +2104,7 @@ def mapping_table_expand3(name):
     json.dump(ans_list,open(json_save_path,'w'))
 
 def mapping_table_seperate(name,max_token,min_token,padding):
+    
     full_list=[i for i in range(157)]
     json_file=json.load(
             open(os.path.join("/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel",name+'.json'),'r')
@@ -1537,7 +2115,7 @@ def mapping_table_seperate(name,max_token,min_token,padding):
     # key2=list(json_file2.keys())
     json_keys=[item for item in keys if 'label' not in item]
     ans_list=[[] for i in range(max_token-min_token+1)]
-    len_a=[]
+
     for k in tqdm(json_keys):
         label_name=k+'_label'
         json_set=set(json_file[label_name])
@@ -1550,10 +2128,8 @@ def mapping_table_seperate(name,max_token,min_token,padding):
             l=get_sperate_labels_constrain(k,json_set,full_list,tokens,padding)
             ans_list[tokens-min_token].append(l)
 
-    # print(name,':',len(ans_list),' ',len(keys),' ',np.mean(len_a),' ',np.sum(len_a),' ',len(len_a))
     for i in range(max_token-min_token+1):
         json.dump(ans_list[i],open(json_save_paths[i],'w'))
-
 
 def tally_duplicate(csv_name):  
 
@@ -1704,7 +2280,6 @@ def tally_duplicate(csv_name):
 
     print('片段个数','\t',dup_value,'\t',dup_value1,'\t',dup_value2)
 
-
 def cut_2():
     base_path='/home/wu_tian_ci/revisiting-spatial-temporal-layouts/data/action_genome/frames'
     videos=os.listdir(base_path)
@@ -1737,8 +2312,6 @@ def cut_2():
                     person_img=img.crop(tuple(pbbx))
                     person_img.save(os.path.join(person_dir,video.split('.')[0]+png_name.split('.')[0]+str(iddx)+'person.png'))
    
-
-
 def label_compute(name):
     full_list=[i for i in range(157)]
     json_file=json.load(
@@ -1766,6 +2339,9 @@ def label_compute(name):
         if (i%5==0) and (i!=0):
             print('')
     print('')
+    xx=[i for i in range(1,17)]
+    y=label_list[:16]
+    draw_list_multi([y],xx,'video_nums',['video num'])
 
         
 import argparse
@@ -1799,9 +2375,29 @@ if __name__=="__main__":
     # print(len(cls_dict.keys()))
     # label_compute('train')
     # label_compute('test')
-    mapping_table_seperate('test',16,0,True)
-    mapping_table_seperate('test',16,1,False)
+    # mapping_table('test')
+    # mapping_table('train')
+
+
+    # mapping_table_seperate('test',16,0,True)
+    # mapping_table_seperate('test',16,0,False)
+
     # label_compute('test')
+    # mapping_table('train',2)
+    # mapping_table('test',2)
+
+    # mapping_table_test('test',1)
+    # mapping_table_test('test',2)
+    set_seed()
+    # mapping_table_test('test',6)
+    # trans_all_json()
+
+    # for i in range(1,6):
+    #     generate_bbx_mask_cls_rel_shift('test'+str(i))
+    #     generate_bbx_mask_cls_rel_shift('train'+str(i))
+    for i in range(1,6):
+        pkl_process_all_cls_rel_shift('test'+str(i),'cuda:1')
+        pkl_process_all_cls_rel_shift('train'+str(i),'cuda:1')
     # tally_bbx_in_video()
     # generate_bbx_mask(args.type)
     # trans_all(args.type,args.type)

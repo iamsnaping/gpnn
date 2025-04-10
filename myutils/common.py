@@ -21,6 +21,8 @@ class FFN(nn.Module):
             return self.norm(X+self.layer(X))
         else:
             return X+self.layer(X)
+    
+
 
 class ProjectionHeadFT(nn.Module):
     def __init__(self,in_dim,eps=1e-12,hidden_dim=None,dropout=0.3,norm_=True):
@@ -87,7 +89,22 @@ class DynamicFlatter(nn.Module):
         # self.f1=MLP(in_dim,in_dim,dropout,eps)
 
         self.f2=FFN(in_dim,eps,in_dim*4,dropout)
+        self.vl_weight=[]
+        self.fl_weight=[]
+        self.visual=False
+    
 
+    def set_visual(self,flag):
+        self.flag=flag
+    
+
+    def get_visual(self):
+        return self.vl_weight,self.fl_weight
+    
+    def get_last_layer(self):
+        return self.f2.weight
+        
+    
     # batch frame nodes dims
     def forward(self,X):
         b,f,n,d=X.shape
@@ -110,6 +127,9 @@ class DynamicFlatter(nn.Module):
         f1=f1*video_scores
         f1=torch.sum(f1,dim=-2)
         f2=self.f2(f1)
+        if self.visual:
+            self.vl_weight.append(video_scores.cpu().detach().numpy())
+            self.fl_weight.append(frame_scores.cpu().detach().numpy())
         return f2
 
 
@@ -189,6 +209,9 @@ class MLP(nn.Module):
         self.lin=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,out_dim),nn.LayerNorm(out_dim,eps=eps),nn.GELU())
     def forward(self,X):
         return self.lin(X)
+    
+    def get_last_layer(self):
+        return self.lin[1].weight
 
 
 class Linear(nn.Module):

@@ -1,0 +1,73 @@
+CONFIG
+loss:
+adt:
+  cls:0.1
+  cls_max:0.1
+  rel:1.0
+ cls:1.0
+spe:
+  margin:0.05
+  weight:1.0
+ rec:1.0
+ pri:1.5
+ tot:1.0
+ com:1.0
+cos:
+  margin:0.3
+temp:0.1
+dropout:0.2
+eps:1e-05
+transformer:
+ layers:4
+ heads:12
+dims:768
+hidden_size:768
+frames:16
+actors:10
+cls:
+ ag:157
+ obj:38
+ rel:30
+adapter:
+ffn:
+  layers:2
+  indims:512
+pj:
+  indims:512
+  outdims:768
+  eps:1e-05
+  dropout:0.1
+gpnn:
+layer:
+  private:4
+  common:3
+pj:
+  layer:3
+ enc_layer:2
+mix:
+ mode:mix
+ layer:1
+ hidden_size:768
+ tfm_layer:1
+finetune:
+ p_nums:10
+recs:
+ layer:3
+prompt:
+ type:1
+
+
+ARGS
+device:cuda:2
+sup:nothing
+epoch:20
+warmup:2
+batchsize:32
+lr:0.0002
+decay:0.001
+clip_val:5.0
+model:mix3
+ds:2
+stage:1
+tp:0
+prompt:1

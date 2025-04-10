@@ -68,8 +68,6 @@ class GPFPlus(nn.Module):
         if flag:
             self.tokens=nn.Embedding(config.cls.ag,config.dims*config.finetune.p_nums)
             self.ptokens=nn.Embedding(config.cls.ag,config.dims)
-            # self.t_linear=nn.Linear(config.dims,config.dims)
-            # self.p_linear=nn.Linear(config.dims,config.dims)
         else:
             self.tokens=nn.Linear(config.cls.ag,config.dims*config.finetune.p_nums)
             self.ptokens=nn.Linear(config.cls.ag,config.dims)
