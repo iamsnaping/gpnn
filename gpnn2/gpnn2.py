@@ -129,7 +129,7 @@ class GPNNCell4(torch.nn.Module):
         self.tfm = nn.TransformerEncoder(
             encoder_layer=encoder_layer, num_layers=config.gpnn.enc_layer
         )
-        self.edges=None
+        self.edges=[]
         self.visual=False
 
         # self._load_link_fun()
@@ -151,8 +151,9 @@ class GPNNCell4(torch.nn.Module):
         tmp_edge=einops.rearrange(tmp_edge,'(b n) f d -> b f n d',b=B,n=N*2)
 
         weight_edge=self.link_fun(tmp_edge)
+
         if self.visual:
-            self.edges=weight_edge.cpu().detach().numpy()
+            self.edges.append(weight_edge.cpu().detach())
         node_features=torch.cat([human_features,obj_features],dim=-2)
 
         m_v = self.message_fun(node_features, node_features, tmp_edge)

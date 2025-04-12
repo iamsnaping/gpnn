@@ -959,7 +959,6 @@ class MixAns3(Dataset):
         # rel=torch.zeros(self.rel_num,dtype=torch.float32)
         return frames,bbx,mask,label,cls_ids,cls_cls,rel[:,1:,:],private_label,common_label,token_tensor,mask_
 
-
 class VisualizeDataset(Dataset):
     def __init__(self,name,sample_each_clip=16,node_nums=10,mapping_type=1,test_i=1,test_j=1):
         super().__init__()
@@ -978,6 +977,18 @@ class VisualizeDataset(Dataset):
         elif mapping_type==2:
             self.mapping=json.load(
                 open(os.path.join('/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_2',str(test_i),str(test_j),name+'.json'))
+            )
+        elif mapping_type==3:
+            self.mapping=json.load(
+                open(os.path.join('/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_3',str(test_i),str(test_j),name+'.json'))
+            )
+        elif mapping_type==4:
+            self.mapping=json.load(
+                open(os.path.join('/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_4',str(test_i),str(test_j),name+'.json'))
+            )
+        elif mapping_type==5:
+            self.mapping=json.load(
+                open(os.path.join('/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_5',name+'.json'))
             )
         else:
             raise ModuleNotFoundError
@@ -1075,7 +1086,6 @@ class VisualizeDataset(Dataset):
 
         return frames,bbx,bbx_,key,indices,\
             label,cls_ids,cls_cls,rel[:,1:,:],private_label,common_label,token_tensor
-
 
 class TestMixAns(Dataset):
     def __init__(self,name,d_t,d_i,sample_each_clip=16,node_nums=10,train=True):
@@ -1195,7 +1205,6 @@ class TestMixAns(Dataset):
         # cls=torch.zeros(self.obj_cls_num,dtype=torch.float32)
         # rel=torch.zeros(self.rel_num,dtype=torch.float32)
         return frames,bbx,mask,label,cls_ids,cls_cls,rel[:,1:,:],private_label,common_label,token_tensor,mask_
-
 
 class ImageDatsetALL(Dataset):
     def __init__(self,name,sample_each_clip=16,train=True):

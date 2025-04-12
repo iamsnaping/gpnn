@@ -316,7 +316,7 @@ def test_oracle3(args,pretrain,p1,p2):
     f2=open(write_ans_path,'w')
     with torch.no_grad():
 
-        test_dataset=MixAns2('test',sample_each_clip=16,train=False,mapping_type=args.dt)
+        test_dataset=MixAns3('test',sample_each_clip=16,train=False,mapping_type=args.dt)
 
         test_loader=DataLoader(test_dataset,batch_size=args.batchsize*4,num_workers=12)
 
@@ -551,8 +551,8 @@ if __name__=='__main__':
     args = parser.parse_args()
     # train(args,True
     # p='/home/wu_tian_ci/GAFL/recoder/checkpoint/train/20250324/2211/1_t:68.13982m:64.26654.pth'
-    p1='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250327/1238/20_t:61.87185_c:88.61021_p:58.9198_o1:59.48385.pth'
-    p2='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250409/0016/3_t:68.92908_o1:60.87623.pth'
+    p1='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250407/1849/20_t:56.0987_c:98.34421_p:53.22037.pth'
+    p2='/home/wu_tian_ci/GAFL/recoder/checkpoint/train/20250410/1518/3_t:67.77591_o1:59.29009.pth'
     if args.tp ==0:
         test_oracle(args,False,p1)
     elif args.tp==1:

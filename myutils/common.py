@@ -71,16 +71,16 @@ class DynamicFlatter(nn.Module):
 
         # frame-level
         self.pj1_1=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,in_dim),nn.GELU())
-        self.pj1_2=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU())
+        self.pj1_2=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,in_dim),nn.GELU())
         # video-level
         self.pj2_1=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,in_dim),nn.GELU())
-        self.pj2_2=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU())
+        self.pj2_2=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,in_dim),nn.GELU())
 
         # frame-level
-        self.score1=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),nn.LayerNorm(in_dim//4),
+        self.score1=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),
                                   nn.GELU(),nn.Linear(in_dim//4,1),nn.Sigmoid())
         # video-level
-        self.score2=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),nn.LayerNorm(in_dim//4),
+        self.score2=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),
                                   nn.GELU(),nn.Linear(in_dim//4,1),nn.Sigmoid())
     
 
@@ -95,7 +95,7 @@ class DynamicFlatter(nn.Module):
     
 
     def set_visual(self,flag):
-        self.flag=flag
+        self.visual=flag
     
 
     def get_visual(self):
@@ -109,10 +109,10 @@ class DynamicFlatter(nn.Module):
     def forward(self,X):
         b,f,n,d=X.shape
         frame_level=self.pj1_2(self.pj1_1(X)+X)
-        f_global_x=torch.mean(frame_level[:,:,:,:(self.dims//2)],dim=-2,keepdim=True)
-        f_local_x=frame_level[:,:,:,(self.dims//2):]
-        # print('global',f_global_x.shape,f_local_x.shape)
-        frame_level=torch.cat([f_global_x.repeat(1,1,n,1),f_local_x],dim=-1)
+        # f_global_x=torch.mean(frame_level[:,:,:,:(self.dims//2)],dim=-2,keepdim=True)
+        # f_local_x=frame_level[:,:,:,(self.dims//2):]
+        # # print('global',f_global_x.shape,f_local_x.shape)
+        # frame_level=torch.cat([f_global_x.repeat(1,1,n,1),f_local_x],dim=-1)
         frame_scores=self.score1(frame_level)
         X=X*frame_scores
         X=torch.sum(X,dim=-2)
@@ -120,16 +120,16 @@ class DynamicFlatter(nn.Module):
         f1=self.f1(X)
 
         video_level=self.pj2_2(self.pj2_1(f1)+f1)
-        v_global_x=torch.mean(video_level[:,:,:(self.dims//2)],dim=-2,keepdim=True)
-        v_local_x=video_level[:,:,(self.dims//2):]
-        video_level=torch.cat([v_global_x.repeat(1,f,1),v_local_x],dim=-1)
+        # v_global_x=torch.mean(video_level[:,:,:(self.dims//2)],dim=-2,keepdim=True)
+        # v_local_x=video_level[:,:,(self.dims//2):]
+        # video_level=torch.cat([v_global_x.repeat(1,f,1),v_local_x],dim=-1)
         video_scores=self.score2(video_level)
         f1=f1*video_scores
         f1=torch.sum(f1,dim=-2)
         f2=self.f2(f1)
         if self.visual:
-            self.vl_weight.append(video_scores.cpu().detach().numpy())
-            self.fl_weight.append(frame_scores.cpu().detach().numpy())
+            self.vl_weight.append(video_scores.cpu().detach())
+            self.fl_weight.append(frame_scores.cpu().detach())
         return f2
 
 

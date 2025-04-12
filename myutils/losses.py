@@ -61,6 +61,7 @@ class ReconstructLoss(Loss):
         # probs2=F.softmax(target,dim=-1)
         # loss=F.relu(self.loss(probs1,probs2)-self.margin)/target.size(0)
         margin=self.max_margin-epoch/self.max_epoch*(self.max_margin-self.margin)
+        # margin=0
         loss=torch.mean(F.relu(torch.mean(self.loss(target,reconstruct),dim=(1,2,3))-margin))
         return loss*self.config.loss.rec.weight,round(loss.item(),2)
 
@@ -84,6 +85,7 @@ class SeperationLoss(Loss):
         # margin=self.margin
         sigma1 = torch.sqrt(torch.mean(x1.pow(2)))
         sigma2 = torch.sqrt(torch.mean(x2.pow(2)))
+        # margin=0
         corr = torch.mean(F.relu(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2)-margin))
         # corr=F.relu(torch.abs(torch.mean(x1*x2))/(sigma1*sigma2)-self.margin)
         # corr=torch.mean(F.relu(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2)))
