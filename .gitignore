@@ -44,6 +44,7 @@ torch_extra/
 /backbone
 /backbone/
 /train/sh_file
+/visualize/*.txt
 /requirements.txt
 /test.py
 /train_net_dynamic.py
