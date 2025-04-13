@@ -233,25 +233,37 @@ class MixLayer(nn.Module):
 
     # temporal batch*node frame dims -> spatial
     # spatial batch* frame node dims -> temporal
-    def forward(self,temporal_x,spaital_x):
+    # mask batch frame node
+    def forward(self,temporal_x,spaital_x,mask):
 
-        spaital_x=einops.rearrange(spaital_x,'(b f) n d ->  (b n) f d',f=self.frames,n=self.actors)
+        spaital_x=einops.rearrange(spaital_x,'(b f) n d ->  (b n) f d',f=self.frames,n=self.actors) 
 
         temporal_x=einops.rearrange(temporal_x,'(b n) f d -> (b f) n d',f=self.frames,n=self.actors)
-
-        # out_s=self.spatial_mlp(self.spatial(temporal_x))
-        # out_t=self.temporal_mlp(self.temporal(spaital_x))
+        if mask is not None:
+            tem_mask=einops.rearrange(mask,'b f n -> (b f) n',f=self.frames,n=self.actors)
+            spa_mask=einops.rearrange(mask,'b f n ->  (b n) f ',f=self.frames,n=self.actors) 
+            spa_mask[torch.all(spa_mask==True,dim=-1)]=False
+        
         if self.mlp_flag:
-             
-            out_s=self.spatial(self.spatial_mlp(temporal_x))
-            out_t=self.temporal(self.temporal_mlp(spaital_x))
-
-            # out_s=self.spatial_mlp(self.spatial(temporal_x))
-            # out_t=self.temporal_mlp(self.temporal(spaital_x))           
+            if mask is None:
+                out_s=self.spatial(self.spatial_mlp(temporal_x))
+                out_t=self.temporal(self.temporal_mlp(spaital_x))
+            else:
+                out_s=self.spatial(self.spatial_mlp(temporal_x),
+                                src_key_padding_mask=tem_mask)
+                out_t=self.temporal(self.temporal_mlp(spaital_x),
+                                src_key_padding_mask=spa_mask)      
         else:
-            out_s=self.spatial(temporal_x)
-            out_t=self.temporal(spaital_x)
-
+            if mask is None:
+                out_s=self.spatial(temporal_x)
+                out_t=self.temporal(spaital_x)
+            else:
+                # breakpoint()
+                out_s=self.spatial(temporal_x,
+                        src_key_padding_mask=tem_mask)
+                out_t=self.temporal(spaital_x,
+                        src_key_padding_mask=spa_mask)
+        # breakpoint()
         return out_t,out_s
 
 class MixBlock(nn.Module):
@@ -272,9 +284,9 @@ class MixBlock(nn.Module):
     # out temporal spatial
     # temporal batch*node frame dim
     # spatial batch*frame node dim
-    def forward(self,temporal_in,spatial_in):
+    def forward(self,temporal_in,spatial_in,mask):
 
-        layer1_t,layer1_s=self.layer1(temporal_in,spatial_in)
+        layer1_t,layer1_s=self.layer1(temporal_in,spatial_in,mask)
 
         if self.mode=='mix':
             layer2_t=self.tmr_mlp(einops.rearrange(layer1_s,'(b f) n d -> (b n) f d',f=self.frames,n=self.actors)+layer1_t+temporal_in)
@@ -283,7 +295,7 @@ class MixBlock(nn.Module):
             layer2_t=temporal_in+layer1_t
             layer2_s=spatial_in+layer1_s
 
-        layer3_t,layer3_s=self.layer2(layer2_t,layer2_s)
+        layer3_t,layer3_s=self.layer2(layer2_t,layer2_s,mask)
         return layer3_t,layer3_s
 
 class MixTSE(nn.Module):
@@ -297,13 +309,16 @@ class MixTSE(nn.Module):
 
         
     # batch frame node dim
-    def forward(self,X):
+    # mask batch frame node
+    def forward(self,X,mask=None):
         ba,fr,nod,dim=X.shape
         temporal=einops.rearrange(X,'b f n d -> (b n) f d')
         spatial=einops.rearrange(X,'b f n d -> (b f) n d')
-
+        if mask is not None:
+            padding_=torch.zeros((ba,fr,1),dtype=torch.bool).to(mask.device)
+            mask=torch.cat([padding_,mask],dim=-1)
         for layer in self.tse:
-            temporal,spatial=layer(temporal,spatial)
+            temporal,spatial=layer(temporal,spatial,mask)
         temporal=einops.rearrange(temporal,'(b n) f d -> b f n d',b=ba,f=fr,n=nod)
         spatial=einops.rearrange(spatial,'(b f) n d -> b f n d',b=ba,f=fr,n=nod)
         return self.mlp(temporal+spatial)
@@ -2659,7 +2674,7 @@ class GPNNMix4(nn.Module):
                 param.requires_grad=True
 
     # private common total
-    def forward1(self,frames,cls,rel,bbx_list,task_id):
+    def forward1(self,frames,cls,rel,bbx_list,task_id,mask=None,tfm_mask=None):
         # nums =node+1
         B,Frame,Nums,dims=frames.shape
         # breakpoint()
@@ -2679,7 +2694,8 @@ class GPNNMix4(nn.Module):
  
         # frames_features=
         # projection head
-        frames_features=self.pj(self.tse(self.fusion(adapter_feature+bbx)+pos))
+        frames_features=self.pj(self.tse(self.fusion(adapter_feature+bbx)+pos,tfm_mask))
+        # breakpoint()
 
         # total features for a consist edge cls
         human_obj_feature=frames_features[:,:,1:,:]
@@ -2706,11 +2722,11 @@ class GPNNMix4(nn.Module):
 
         p_f=self.mffn2(self.pgpfp(human_obj_feature,task_id))
         c_f=self.mffn3(self.cgpfp(human_obj_feature,task_id))
+        
+        p_human_feature,p_obj_feature=self.gpnn(p_f[:,:,0,:].unsqueeze(-2),p_f[:,:,1:,:],edge_feature,self.pgpfp,task_id,mask,tfm_mask)
 
-        p_human_feature,p_obj_feature=self.gpnn(p_f[:,:,0,:].unsqueeze(-2),p_f[:,:,1:,:],edge_feature,self.pgpfp,task_id)
+        c_human_feature,c_obj_feature=self.gpnn(c_f[:,:,0,:].unsqueeze(-2),c_f[:,:,1:,:],edge_feature,self.cgpfp,task_id,mask,tfm_mask)
 
-        # c_human_feature,c_obj_feature=self.cgpnn(human_feature,obj_feature,edge_feature,self.cgpfp,task_id)
-        c_human_feature,c_obj_feature=self.gpnn(c_f[:,:,0,:].unsqueeze(-2),c_f[:,:,1:,:],edge_feature,self.cgpfp,task_id)
 
         p_features=torch.cat([p_human_feature,p_obj_feature],dim=-2)
 
@@ -2920,9 +2936,9 @@ class GPNNMix4(nn.Module):
  
 
     # add [0.,0.,1.,1.] to the first line of every batch 
-    def forward(self,frames,cls,rel,bbx_list,task_id):
+    def forward(self,frames,cls,rel,bbx_list,task_id,mask=None,tfm_mask=None):
         if self.stage==1:
-            return self.forward1(frames,cls,rel,bbx_list,task_id)
+            return self.forward1(frames,cls,rel,bbx_list,task_id,mask,tfm_mask)
         elif self.stage==2:
             return self.forward2(frames,cls,rel,bbx_list,task_id)
         elif self.stage==3:

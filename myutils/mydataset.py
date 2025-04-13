@@ -773,6 +773,12 @@ class MixAns2(Dataset):
         bbx=torch.tensor([self.bbx[key][index] for index in indices],dtype=torch.float32)
         # mask=np.array([self.mask[key][index] for index in indices],dtype=np.int64)
         mask=torch.tensor([self.mask[key][index] for index in indices],dtype=torch.long)
+        # for gpnn
+        mask_=~mask.bool()
+        mask=mask[:,1:]
+        mask=torch.cat([mask,mask],dim=-1).unsqueeze(-1)
+
+
         cls_ids=torch.tensor([self.cls[key][index] for index in indices],dtype=torch.long)
         rel_ids=[self.rel[key][index] for index in indices]
 
@@ -781,7 +787,7 @@ class MixAns2(Dataset):
         label_idx=self.json[label_name]
         label_idx=[int(x) for x in label_idx]
         label=torch.zeros(self.num_cls,dtype=torch.float32)
-        mask_=torch.zeros(self.num_cls+1,dtype=torch.long)
+        
 
         private_label=torch.zeros(self.num_cls+1,dtype=torch.float32)
         common_label=torch.zeros(self.num_cls+1,dtype=torch.float32)
@@ -790,7 +796,7 @@ class MixAns2(Dataset):
 
         frames=torch.concat(frames,dim=0).float()
         label[label_idx]=1.0
-        mask_[label_idx]=1
+        
         private_label[private_ans]=1.0
         common_label[common_ans]=1.0
         token_tensor[tokens]=1.0

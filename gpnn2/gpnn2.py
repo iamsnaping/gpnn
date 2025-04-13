@@ -136,7 +136,7 @@ class GPNNCell4(torch.nn.Module):
     # edge features [batch frames nodes-1 dims] nodes==edges
     # human feature [batch frames 1 dims]
     # obj features [batch frames nodes-1 dims]
-    def forward(self, human_feature,obj_features,edge_features):
+    def forward(self, human_feature,obj_features,edge_features,mask=None,tfm_mask=None):
         B,F,N,D=obj_features.shape
         human_features=human_feature.repeat(1, 1, N, 1)
 
@@ -147,11 +147,18 @@ class GPNNCell4(torch.nn.Module):
         # tmp_edge1=self.edge_fun(torch.cat([edge_features,obj_features],dim=-1))
         # tmp_edge2=self.edge_fun(torch.cat([edge_features,human_features],dim=-1))
         # tmp_edge=torch.cat([tmp_edge1,tmp_edge2],dim=-2)
-        tmp_edge=self.tfm(einops.rearrange(tmp_edge,'b f n d -> (b n) f d'))
+        if tfm_mask is not None:
+            tmp_edge=self.tfm(einops.rearrange(tmp_edge,'b f n d -> (b n) f d'),
+                            src_key_padding_mask=tfm_mask)
+        else:
+            tmp_edge=self.tfm(einops.rearrange(tmp_edge,'b f n d -> (b n) f d'))
         tmp_edge=einops.rearrange(tmp_edge,'(b n) f d -> b f n d',b=B,n=N*2)
 
-        weight_edge=self.link_fun(tmp_edge)
-
+        # breakpoint()
+        if mask is not None:
+            weight_edge=self.link_fun(tmp_edge)*mask
+        else:
+            weight_edge=self.link_fun(tmp_edge)
         if self.visual:
             self.edges.append(weight_edge.cpu().detach())
         node_features=torch.cat([human_features,obj_features],dim=-2)
@@ -159,7 +166,8 @@ class GPNNCell4(torch.nn.Module):
         m_v = self.message_fun(node_features, node_features, tmp_edge)
         m_v=self.merging(m_v)
         weight_edge=weight_edge.expand_as(m_v)
-   
+        # if mask is not None:
+        #     breakpoint()
         edge_weighted=(weight_edge*m_v)
         edge_weighted_human=edge_weighted[:,:,:N,:]
         edge_weighted_obj=edge_weighted[:,:,N:,:]
@@ -360,14 +368,19 @@ class GPNN4(nn.Module):
 
 
     # node features batch frames nodes dims
-    def forward(self,node_features,obj_feature,edge_feature,prompt=None,task_id=None):
+    # mask: batch frame node -> (batch node) frame
+    def forward(self,node_features,obj_feature,edge_feature,prompt=None,task_id=None,mask=None,tfm_mask=None):
+        if tfm_mask is not None:
+            tfm_mask=torch.cat([tfm_mask[:,:,1:],tfm_mask[:,:,1:]],dim=-1)
+            tfm_mask=einops.rearrange(tfm_mask,'b f n -> (b n) f')
+            tfm_mask[torch.all(tfm_mask==True,dim=-1)]=False
         for layer in self.gpnn:
             if prompt is not None:
                 t_node=torch.cat([node_features,obj_feature],dim=-2)
                 t_node=prompt(t_node,task_id)
                 node_features=t_node[:,:,0,:].unsqueeze(-2)
                 obj_feature=t_node[:,:,1:,:]
-            node_features,obj_feature=layer(node_features,obj_feature,edge_feature)
+            node_features,obj_feature=layer(node_features,obj_feature,edge_feature,mask,tfm_mask)
 
         # t_node=self.pj(torch.cat([node_features,obj_feature],dim=-2))
         # return t_node[:,:,0,:].unsqueeze(-2),t_node[:,:,1:,:]
