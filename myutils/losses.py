@@ -55,12 +55,17 @@ class ReconstructLoss(Loss):
         self.margin=config.loss.rec.margin
         self.max_epoch=20
         self.max_margin=config.loss.rec.max_mar
+        self.mw=config.loss.rec.mw
+        self.step=0
+    
+    def reset(self):
+        self.step=0
 
     def __call__(self,target,reconstruct,epoch):
         # probs1=F.log_softmax(reconstruct,dim=-1)
         # probs2=F.softmax(target,dim=-1)
         # loss=F.relu(self.loss(probs1,probs2)-self.margin)/target.size(0)
-        margin=self.max_margin-epoch/self.max_epoch*(self.max_margin-self.margin)
+        margin=self.max_margin-epoch/self.max_epoch*(self.max_margin-self.margin)*self.mw
         # margin=0
         loss=torch.mean(F.relu(torch.mean(self.loss(target,reconstruct),dim=(1,2,3))-margin))
         return loss*self.config.loss.rec.weight,round(loss.item(),2)
@@ -72,6 +77,11 @@ class SeperationLoss(Loss):
         self.margin=config.loss.spe.margin
         self.max_margin=config.loss.spe.max_mar
         self.max_epoch=20
+        self.mw=config.loss.spe.mw
+        self.step=0
+    
+    def reset(self):
+        self.step=0
     
     def __call__(self,x1,x2,epoch):
         # Subtract the mean 
@@ -79,9 +89,10 @@ class SeperationLoss(Loss):
         x1 = x1 - x1_mean
         x2_mean = torch.mean(x2, (1,2,3), True)
         x2 = x2 - x2_mean
+
         # print('mean',x1_mean,x2_mean)
         # Compute the cross correlation
-        margin=self.max_margin-epoch/self.max_epoch*(self.max_margin-self.margin)
+        margin=self.max_margin-epoch/self.max_epoch*(self.max_margin-self.margin)*self.mw
         # margin=self.margin
         sigma1 = torch.sqrt(torch.mean(x1.pow(2)))
         sigma2 = torch.sqrt(torch.mean(x2.pow(2)))

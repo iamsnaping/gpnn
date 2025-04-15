@@ -28,11 +28,15 @@ from torch import nn as nn
 # print(ans2)
 # ans3=tfm(a,src_key_padding_mask=mask2)
 # print(ans3)
-a=~torch.tensor([0.,1.,0.,0.],dtype=torch.bool)
-print(a)
-a=torch.tensor([[False,True],[True,True]])
-print(a)
-print(a.shape)
-mask=torch.all(a==True,dim=-1)
-a[mask]=False
-print(a)
+
+import math
+def prob_at_least_one(N, m, k):
+    return 1 - (math.comb(N - m, k) / math.comb(N, k))
+
+# 示例：总共157个物体，想要的物体有5个，抽16个
+N = 157
+m = 1
+k = 16
+
+p = prob_at_least_one(N, m, k)
+print(f"拿到至少一个想要的概率: {p:.4f}")

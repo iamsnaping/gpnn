@@ -636,6 +636,7 @@ def train_oracle(args,pretrain):
     # model=load_model_dict('/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250319/1503/20_c:88.3695_p:58.54179_o:59.57755.pth'
     #                 ,model)
     # breakpoint()
+    num_batches = len(dataset) // args.batchsize
     cri=Criterion(config)
     adapter=AdapterLoss(config)
     sloss=SeperationLoss(config)
@@ -644,7 +645,7 @@ def train_oracle(args,pretrain):
 
     parameters = add_weight_decay(model, args.decay)
     optimizer = optim.AdamW(parameters, lr=args.lr)
-    num_batches = len(dataset) // args.batchsize
+    print('numba',num_batches)
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps=args.warmup * num_batches,
@@ -706,16 +707,16 @@ def train_oracle(args,pretrain):
                 # loss=loss1+loss2+loss3+loss4+loss5+loss6
                 if args.stage in [3,5]:
                     loss8,loss8_1=cri(m_ans,label)
-                    loss5,loss5_1,loss5_2=adapter(rel_ans,cls_ans,rel_l,cls_l,epoch+1)
+                    loss5,loss5_1,loss5_2=adapter(rel_ans,cls_ans,rel_l,cls_l)
                     loss=loss8+loss5
                 elif args.stage in [1]:
-                    loss4,loss4_1=rloss(human_obj_feature,recs,epoch+1)
+                    loss4,loss4_1=rloss(human_obj_feature,recs)
                     loss2,loss2_1,=cri(t_ans,label) 
                     loss1,loss1_1=cri(c_ans,common_label)
                     loss6,loss6_1=cri(p_ans,private_label)
                     d_weight=model.get_weight(loss6,loss1)
                     loss5,loss5_1,loss5_2=adapter(rel_ans,cls_ans,rel_l,cls_l,epoch+1)
-                    loss3,loss3_1=sloss(c_features,p_features,epoch+1)
+                    loss3,loss3_1=sloss(c_features,p_features)
                     loss=loss1+loss5+loss6*config.loss.pri*d_weight+loss2+loss3+loss4
                 else:
                     raise NotImplementedError
@@ -750,6 +751,7 @@ def train_oracle(args,pretrain):
                 frames,bbx,mask,label,cls_ids,cls_l,rel_l,private_label,common_label,token_tensor,mask_=batch
                 frames=frames.to(device)
                 bbx=bbx.to(device)
+                mask_=mask_.to(device)
                 mask=mask.to(device)
                 cls_l=cls_l.to(device)
                 rel_l=rel_l.to(device)
@@ -760,7 +762,7 @@ def train_oracle(args,pretrain):
 
                 label=label.to(device).squeeze()
                 if args.stage in [1] :
-                    c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
+                    c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor,mask,mask_)
                 elif args.stage in [3,5]:
                     m_ans,cls_ans,rel_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
                 else:
@@ -952,7 +954,6 @@ def train_oracle_continue(args,pretrain,p):
         acc_str='t:'+str(round(metrics['map']*100,5))+'_o1:'+str(round(metrics4['map']*100,5))
         save_checkpoint(epoch+1,model,acc_str,optimizer,scheduler,time_stamp,'train')
         print('saved')
-
 
 def train_clip_stlt(args):
     config=load_config()
@@ -1198,7 +1199,6 @@ def train_text2(args):
         #     print('saved')
         # else:
         #     save_checkpoint(epoch+1,model,round(metrics['map']*100,5),optimizer,scheduler,time_stamp,'train')
-
 
 def train_pure(args,pretrain):
     config=load_config()
@@ -1498,7 +1498,7 @@ if __name__=='__main__':
         train_oracle(args,False)
     elif args.tp==1:
         # p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250327/1238/20_t:61.87185_c:88.61021_p:58.9198_o1:59.48385.pth'
-        p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250407/1849/20_t:56.0987_c:98.34421_p:53.22037.pth'
+        p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250413/1851/20_t:59.83143_c:90.10696_p:52.09836.pth'
         train_oracle_continue(args,False,p)
     else:
         raise NotImplementedError

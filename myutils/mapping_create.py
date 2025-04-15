@@ -91,7 +91,6 @@ def get_cls_num():
             }
     return cls_num
 
-
 def process_cls(repeat_cls):
     pattern=r'c(\d{3})'
     all_=re.findall(pattern,repeat_cls)
@@ -1906,6 +1905,7 @@ def mapping_table_test(name,label_type=1):
     jsp_=''
     ans_list=[[[] for j in range(i+1)] for i in range(16)]
     ans_=[]
+    ans_1,ans_2,ans_3=[],[],[]
     if label_type==4:
         ans_list=[[[[] for j in range(i+1)] for i in range(16)],
                   [[[] for j in range(i+1)] for i in range(16)],
@@ -1926,6 +1926,12 @@ def mapping_table_test(name,label_type=1):
         json_base_path='/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_4'
     elif label_type ==6:
         json_base_path='/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_5'
+    elif label_type==7:
+        # 1 all right 2 all wrong 3 padding 16
+        json_base_paths=[
+                        '/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_6/1',
+                        '/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_6/2',
+                        '/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_6/3']
     else:
         raise NotImplementedError
     if label_type in [1,2,3,5]:
@@ -1939,6 +1945,12 @@ def mapping_table_test(name,label_type=1):
         if not os.path.exists(json_base_path):
             os.makedirs(json_base_path)
         jsp_=os.path.join(json_base_path,name+'.json')
+    elif label_type in[7]:
+        jsps=[]
+        for i in range(3):
+            if not os.path.exists(json_base_paths[i]):
+                os.makedirs(json_base_paths[i])
+            jsps.append(os.path.join(json_base_paths[i],name+'.json'))
     elif label_type in [4]:
         for i in range(1,17):
             for j in range(1,i+1):
@@ -1971,7 +1983,7 @@ def mapping_table_test(name,label_type=1):
             l2=get_sperate_labels3(k,json_file[label_name],full_list,False)
         elif label_type==5:
             l=get_sperate_labels4(k,json_file[label_name],full_list)
-        elif label_type==6:
+        elif label_type in [6,7]:
             l1=get_sperate_labels3(k,json_file[label_name],full_list,True)
             l2=get_sperate_labels3(k,json_file[label_name],full_list,False)
             l3=get_sperate_labels4(k,json_file[label_name],full_list)
@@ -1993,6 +2005,11 @@ def mapping_table_test(name,label_type=1):
                 ans_.append(l1[i])
                 ans_.append(l2[i])
                 ans_.append(l3[i])
+            elif label_type in [7]:
+                ans_1.append(l1[i])
+                ans_2.append(l2[i])
+                ans_3.append(l3[i])
+
     # print(name,':',len(ans_list),' ',len(keys),' ',np.mean(len_a),' ',np.sum(len_a),' ',len(len_a))
     if label_type in [1,2,3,5]:
         for i in range(16):
@@ -2008,6 +2025,10 @@ def mapping_table_test(name,label_type=1):
                 json.dump(ans_list[2][i][j],open(json_save_pathss[2][i][j],'w'))
     elif label_type in [6]:
         json.dump(ans_,open(jsp_,'w'))
+    elif label_type in [7]:
+        json.dump(ans_1,open(jsps[0],'w'))
+        json.dump(ans_2,open(jsps[1],'w'))
+        json.dump(ans_3,open(jsps[2],'w'))
 
 def tally_label(name):
     full_list=[i for i in range(157)]
@@ -2389,15 +2410,15 @@ if __name__=="__main__":
     # mapping_table_test('test',1)
     # mapping_table_test('test',2)
     set_seed()
-    # mapping_table_test('test',6)
+    mapping_table_test('test',7)
     # trans_all_json()
 
     # for i in range(1,6):
     #     generate_bbx_mask_cls_rel_shift('test'+str(i))
     #     generate_bbx_mask_cls_rel_shift('train'+str(i))
-    for i in range(1,6):
-        pkl_process_all_cls_rel_shift('test'+str(i),'cuda:1')
-        pkl_process_all_cls_rel_shift('train'+str(i),'cuda:1')
+    # for i in range(1,6):
+    #     pkl_process_all_cls_rel_shift('test'+str(i),'cuda:1')
+    #     pkl_process_all_cls_rel_shift('train'+str(i),'cuda:1')
     # tally_bbx_in_video()
     # generate_bbx_mask(args.type)
     # trans_all(args.type,args.type)

@@ -718,6 +718,10 @@ class MixAns2(Dataset):
             self.mapping=json.load(
                 open(os.path.join('/home/wu_tian_ci/GAFL/json_dataset/mapping2',name+'.json'))
         )
+        elif mapping_type==6:
+            self.mapping=json.load(
+                open(os.path.join('/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_5',name+'.json'))
+        )
         else:
             raise ModuleNotFoundError
         self.mask=json.load(
@@ -1053,6 +1057,11 @@ class VisualizeDataset(Dataset):
         
         cls_ids=torch.tensor([self.cls[key][index] for index in indices],dtype=torch.long)
         rel_ids=[self.rel[key][index] for index in indices]
+        mask=torch.tensor([self.mask[key][index] for index in indices],dtype=torch.long)
+        # for gpnn
+        mask_=~mask.bool()
+        mask=mask[:,1:]
+        mask=torch.cat([mask,mask],dim=-1).unsqueeze(-1)
 
         
         label_name=key+'_label'
@@ -1091,7 +1100,7 @@ class VisualizeDataset(Dataset):
                 rel[i][j][rel_ids[i][j]]=1.
 
         return frames,bbx,bbx_,key,indices,\
-            label,cls_ids,cls_cls,rel[:,1:,:],private_label,common_label,token_tensor
+            label,cls_ids,cls_cls,rel[:,1:,:],private_label,common_label,token_tensor,mask,mask_
 
 class TestMixAns(Dataset):
     def __init__(self,name,d_t,d_i,sample_each_clip=16,node_nums=10,train=True):
