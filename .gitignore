@@ -59,3 +59,4 @@ torch_extra/
 /test
 __pychache__/
 *.py[cod] 
+*.pyc
