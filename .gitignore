@@ -60,4 +60,5 @@ torch_extra/
 __pychache__/
 *.py[cod] 
 *.pyc
+/mytest/
 /mytest
