@@ -1488,6 +1488,12 @@ if __name__=='__main__':
         default=1,
         help="speration and reconstruction loss,0 no loss,1 loss",
     )
+    parser.add_argument(
+        "--p_index",
+        type=int,
+        default=0,
+        help="continue path",
+    )
 
 
     set_seed(seed=3407)
@@ -1498,8 +1504,11 @@ if __name__=='__main__':
         train_oracle(args,False)
     elif args.tp==1:
         # p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250327/1238/20_t:61.87185_c:88.61021_p:58.9198_o1:59.48385.pth'
-        p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250413/1851/20_t:59.83143_c:90.10696_p:52.09836.pth'
-        train_oracle_continue(args,False,p)
+        # p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250413/1851/20_t:59.83143_c:90.10696_p:52.09836.pth'
+        p=['/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250416/1449/20_t:59.87919_c:90.81566_p:49.80294.pth',
+           '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250415/2037/20_t:59.42587_c:91.1116_p:47.09343.pth',
+           '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250420/1044/18_t:60.8355_c:90.10944_p:50.15488.pth']
+        train_oracle_continue(args,False,p[args.p_index])
     else:
         raise NotImplementedError
     # train_text2(args) 

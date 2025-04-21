@@ -4,7 +4,7 @@ sys.path.append('/home/wu_tian_ci/GAFL')
 
 from myutils.config import *
 import argparse
-
+from torch_geometric import nn as tnn
 from torch import nn as nn
 # encoder_layer = nn.TransformerEncoderLayer(
 #     d_model=5,
@@ -29,14 +29,25 @@ from torch import nn as nn
 # ans3=tfm(a,src_key_padding_mask=mask2)
 # print(ans3)
 
-import math
-def prob_at_least_one(N, m, k):
-    return 1 - (math.comb(N - m, k) / math.comb(N, k))
+# import math
+# def prob_at_least_one(N, m, k):
+#     return 1 - (math.comb(N - m, k) / math.comb(N, k))
 
-# 示例：总共157个物体，想要的物体有5个，抽16个
-N = 157
-m = 1
-k = 16
+# # 示例：总共157个物体，想要的物体有5个，抽16个
+# N = 157
+# m = 1
+# k = 16
 
-p = prob_at_least_one(N, m, k)
-print(f"拿到至少一个想要的概率: {p:.4f}")
+# p = prob_at_least_one(N, m, k)
+# print(f"拿到至少一个想要的概率: {p:.4f}")
+
+import cv2
+# a='123'
+# print(a[:-2])
+# a=[1,3,10,4,5]
+# print(sorted(a))
+
+a=torch.randn(2,2,2,2)
+b=torch.ones((1,2,1,2))
+print(a)
+print(a-b)

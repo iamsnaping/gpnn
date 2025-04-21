@@ -104,4 +104,6 @@ recs:
 # 0 simple 1 gpfp
 prompt:
   type: 1
+normtype: 0
+worldsize: 3
 

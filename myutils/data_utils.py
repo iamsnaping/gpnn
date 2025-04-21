@@ -344,11 +344,11 @@ def save_checkpoint(epoch,model,acc,optimizer,scheduler,time_stamp,name):
         path_name=str(epoch)+"_"+str(acc)+'.pth'
     else:
         path_name=str(epoch)+"_"+acc+'.pth'
-    unfroze_dict={param_name:param for param_name,param in model.named_parameters() if param.requires_grad}
+    # unfroze_dict={param_name:param for param_name,param in model.named_parameters() if param.requires_grad}
     state={
-        "optimizer":optimizer.state_dict(),
-        "scheduler":scheduler.state_dict(),
-        "model": unfroze_dict
+        # "optimizer":optimizer.state_dict(),
+        # "scheduler":scheduler.state_dict(),
+        "model": model.state_dict()
     }  
     path_name=os.path.join(t_base_path,path_name)
     print(path_name)
@@ -385,6 +385,7 @@ class MyEvaluatorActionGenome:
         # Action Genome only for STLT so far
         size = logits.shape[0]
         if self.flag:
+            print('softmax')
             self.predictions[self.index : self.index + size] = (
                 torch.softmax(logits,dim=-1).cpu().numpy()
             )
@@ -397,6 +398,7 @@ class MyEvaluatorActionGenome:
 
     def evaluate(self):
         if self.flag:
+            print('softmax2')
             mean_average_precision=np.sum(np.argmax(self.predictions,axis=-1)==np.argmax(self.ground_truths,axis=-1))/self.predictions.shape[0]
         else:
             mean_average_precision, _, _ = charades_map(

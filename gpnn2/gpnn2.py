@@ -19,6 +19,7 @@ from gpnn2.UpdateFunction import UpdateFunction
 import einops
 from torch_geometric import nn as tnn
 from myutils.common import MLPs
+from gpnn2.gpnnutil import (GlobalNorm2,GlobalNorm)
 
 
 class GPNNCell(torch.nn.Module):
@@ -62,9 +63,6 @@ class GPNNCell(torch.nn.Module):
 
         return node_features
 
-
-
-
 class GPNNCell2(torch.nn.Module):
     def __init__(self):
         super(GPNNCell2, self).__init__()
@@ -97,13 +95,11 @@ class GPNNCell2(torch.nn.Module):
         node_features=self.norm(self.residual(node_features,edge_weighted)+node_features)
 
         return node_features,edge_features
-
-
-
 # edge
 class GPNNCell4(torch.nn.Module):
     def __init__(self,config):
         super(GPNNCell4, self).__init__()
+        self.normtype=config.normtype
         self.message_fun = MessageFunction('linear_concat')
         self.edge_fun=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims*3,config.dims),nn.GELU(),
                                     nn.Dropout(config.dropout),nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
@@ -111,10 +107,21 @@ class GPNNCell4(torch.nn.Module):
         self.link_fun = LinkFunction('one_edge')
 
         self.residual=tnn.MessageNorm(learn_scale=True)
-        self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),tnn.GraphNorm(config.dims),nn.GELU())
+
 
         self.residual_obj=tnn.MessageNorm(learn_scale=True)
-        self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),tnn.GraphNorm(config.dims),nn.GELU())
+        if self.normtype==0:
+            print('global norm')
+            self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm(config.dims,1,config.worldsize),nn.GELU())
+            self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm(config.dims,9,config.worldsize),nn.GELU())
+        elif self.normtype==1:
+            print('batch norm')
+            self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),nn.BatchNorm2d(16),nn.GELU())
+            self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),nn.BatchNorm2d(16),nn.GELU())
+        elif self.normtype==2:
+            print('global norm2')
+            self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm2(config.dims,1,config.worldsize),nn.GELU())
+            self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm2(config.dims,9,config.worldsize),nn.GELU())   
 
         self.merging=nn.Sequential(nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
 
@@ -180,7 +187,6 @@ class GPNNCell4(torch.nn.Module):
         # print('obj,human',human_feature.shape,obj_features.shape)
         return human_feature,obj_features
 
-
 class GPNNCellText(torch.nn.Module):
     def __init__(self):
         super(GPNNCellText, self).__init__()
@@ -213,7 +219,6 @@ class GPNNCellText(torch.nn.Module):
         node_features=self.norm(self.residual(node_features,edge_weighted)+node_features)
 
         return node_features
-
 
 # no global features no edges
 class GPNNCell3(torch.nn.Module):

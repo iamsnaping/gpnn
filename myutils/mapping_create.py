@@ -5,6 +5,7 @@ dict
 
 
 '''
+from deprecated import deprecated
 import pickle
 import json
 import pandas as pd
@@ -280,6 +281,9 @@ def process_img_all(img,bbx_list,mask_list,preprocess,device=''):
             tmp_list[i+1]=preprocess(img.crop(bbx_list[i]))
     return tmp_list
 
+
+# add mask/bbx
+@deprecated(reason="Use Json File to load mask and bbx")
 def pkl_process(name,device):
     hdf5_path=os.path.join('/home/wu_tian_ci/GAFL/data/hdf5/all_features',name+'.hdf5')
     img_basepath='/home/wu_tian_ci/revisiting-spatial-temporal-layouts/data/action_genome/frames'

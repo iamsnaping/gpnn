@@ -30,7 +30,7 @@ from myutils.losses import (Criterion,
                             KLSeperation)
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 from transformers.trainer_pt_utils import SequentialDistributedSampler,distributed_concat
-
+from torch.nn import SyncBatchNorm
 
 
 import warnings
@@ -43,7 +43,7 @@ import warnings
 # os.environ['OMP_NUM_THREADS'] = '2'
 
 import torch.distributed as dist
-os.environ['CUDA_VISIBLE_DEVICES']="0,2,3"
+os.environ['CUDA_VISIBLE_DEVICES']="0,1,2"
 os.environ['OMP_NUM_THREADS'] = '1'
 # def set_seed(seed=3407):
 #     random.seed(seed)
@@ -51,7 +51,7 @@ os.environ['OMP_NUM_THREADS'] = '1'
 #     torch.manual_seed(seed)
 #     torch.cuda.manual_seed(seed) 
 
-def set_seed(seed=3407):
+def set_seed(seed=3407,local_rank=0):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -101,14 +101,19 @@ def load_model_dict(p,model,s=False):
 def train_oracle(args,pretrain):
     config=load_config()
     config.prompt.type=args.prompt
+    config.normtype=args.normtype
+    if dist.is_initialized:
+        worldsize=dist.get_world_size()
+        config.worldsize=worldsize if worldsize!=-1 else config.worldsize
     if args.smw==0:
         config.loss.spe.mw=0
     if args.rmw==0:
         config.loss.rec.mw=0
     config.loss.rec.margin=args.rm
     config.loss.spe.margin=args.sm
+
     test_dataset=MixAns2('test',sample_each_clip=16,train=False,mapping_type=args.ds)
-    testts=torch.utils.data.distributed.DistributedSampler(test_dataset)
+    testts=torch.utils.data.distributed.DistributedSampler(test_dataset,shuffle=False)
     test_loader=DataLoader(test_dataset,batch_size=args.batchsize*4,num_workers=12,
                            sampler=testts)
     dataset=MixAns2('train',sample_each_clip=16,train=True,mapping_type=args.ds)
@@ -123,12 +128,17 @@ def train_oracle(args,pretrain):
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK']=str(args.local_rank)
     local_rank=args.local_rank
+    set_seed(seed=args.seed,local_rank=local_rank)
     device = torch.device(local_rank)
+    num_batches = len(dataset) // (args.batchsize*3)
     model=GPNNMix4(config,flag=pretrain,train_stage=args.stage).to(device)
 
     model.apply(weight_init_dis)
+    if args.normtype==1:
+        model=SyncBatchNorm.convert_sync_batchnorm(model)
     model=torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],output_device=local_rank,find_unused_parameters=True)
-    num_batches = len(dataset) // (args.batchsize*3)
+
+    
     cri=Criterion(config)
     adapter=AdapterLoss(config)
     sloss=SeperationLoss(config)
@@ -168,8 +178,11 @@ def train_oracle(args,pretrain):
                                     os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','pretrain',time_stamp[:8],time_stamp[8:12],
                                                 'config_args.txt')])
     counters=0
+    
     for epoch in range(args.epoch):
         model.train()
+        txt_k=0
+        traints.set_epoch(epoch)
         with tqdm(total=len(train_loader)) as pbar:
             for batch in train_loader:
                 counters+=1
@@ -232,6 +245,7 @@ def train_oracle(args,pretrain):
         p_pre,p_lab=[],[]
         t_pre,t_lab=[],[]
         with torch.no_grad():
+            testts.set_epoch(epoch)
             for batch in tqdm(test_loader):
                 frames,bbx,mask,label,cls_ids,cls_l,rel_l,private_label,common_label,token_tensor,mask_=batch
                 frames=frames.to(device)
@@ -285,68 +299,84 @@ def train_oracle(args,pretrain):
                 acc_str='t:'+str(round(metrics['map']*100,5))+'_c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))            
             save_checkpoint(epoch+1,model.module,acc_str,optimizer,scheduler,time_stamp,'pretrain')
             print('saved')
-  
+
 def train_oracle_continue(args,pretrain,p):
     config=load_config()
     config.prompt.type=args.prompt
+    config.normtype=args.normtype
+    if dist.is_initialized:
+        worldsize=dist.get_world_size()
+        config.worldsize=worldsize if worldsize!=-1 else config.worldsize
+    if args.smw==0:
+        config.loss.spe.mw=0
+    if args.rmw==0:
+        config.loss.rec.mw=0
+    config.loss.rec.margin=args.rm
+    config.loss.spe.margin=args.sm
     test_dataset=MixAns2('test',sample_each_clip=16,train=False,mapping_type=args.ds)
-    test_loader=DataLoader(test_dataset,batch_size=args.batchsize*4,num_workers=12)
-
-
+    testts=torch.utils.data.distributed.DistributedSampler(test_dataset)
+    test_loader=DataLoader(test_dataset,batch_size=args.batchsize*4,num_workers=12,
+                           sampler=testts)
     dataset=MixAns2('train',sample_each_clip=16,train=True,mapping_type=args.ds)
-    
+    traints=torch.utils.data.distributed.DistributedSampler(dataset)
+    train_loader=DataLoader(dataset,batch_size=args.batchsize,num_workers=12,
+                            sampler=traints)
+    if args.loss==0:
+        config.loss.spe.weight=0.
+        config.loss.rec.weight=0.
     device=args.device
-
-    if args.model=='mix4':
-        model=GPNNMix4(config,flag=pretrain,train_stage=args.stage).to(device)
-    else:
-        raise NotImplementedError
-
-    # load_model_dict(p)
-    model=load_model_dict(p,model,True)
     
+    if 'LOCAL_RANK' not in os.environ:
+        os.environ['LOCAL_RANK']=str(args.local_rank)
+    set_seed(local_rank=args.local_rank)
+    local_rank=args.local_rank
+    device = torch.device(local_rank)
+    model=GPNNMix4(config,flag=pretrain,train_stage=args.stage).to(device)
+
+    model=load_model_dict(p,model,True)
     model.apply(weight_init_dis)
-    # breakpoint()
+    model=torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],output_device=local_rank,find_unused_parameters=False)
+    num_batches = len(dataset) // (args.batchsize*3)
+    
     cri=Criterion(config)
 
-    # sloss2=KLSeperation(config)
-    print('lr: ',args.lr)
-    parameters = add_weight_decay(model, args.decay)
+
+
+    parameters = add_weight_decay(model.module, args.decay)
     optimizer = optim.AdamW(parameters, lr=args.lr)
-    num_batches = len(dataset) // args.batchsize
+
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
-        num_warmup_steps=int(args.wr * num_batches * args.epoch,),
+        num_warmup_steps=args.warmup * num_batches,
         num_training_steps=args.epoch * num_batches,
     )
+    # total common private middle
     evaluator = MyEvaluatorActionGenome(len(test_dataset),157)
-    evaluator2 = MyEvaluatorActionGenome(len(test_dataset),158)
-    evaluator3 = MyEvaluatorActionGenome(len(test_dataset),158)
     evaluator4 = MyEvaluatorActionGenome(len(test_dataset),157)
-    evaluator4_1 = MyEvaluatorActionGenome(len(test_dataset),157)
-    time_stamp=getTimeStamp()
-    loss_record_path='/home/wu_tian_ci/GAFL/recoder/loss_value'
-    t_path=time_stamp[0:8]
-    loss_record_path_=os.path.join(loss_record_path,t_path)
-    if not os.path.exists(loss_record_path_):
-        os.mkdir(loss_record_path_)
-    loss_record_path=os.path.join(loss_record_path_,time_stamp[8:12]+'loss.txt')
-    if not os.path.exists(loss_record_path):
-        f=open(loss_record_path,'w')
-        f.write('begin to write\n')
-        f.write(p+'continue \n')
-        f.write('lr: '+str(args.lr)+' '+'epoch:'+str(args.epoch)+' '+args.sup+'\n')
-        f.close()
-        if not os.path.exists(os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12])):
-            os.makedirs(os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12]))
-        write_config(config,args,[os.path.join(loss_record_path_,time_stamp[8:12]+'train_config_args.txt'),
-                                  os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12],
-                                               'config_args.txt')])
+
+    if local_rank==0:
+        time_stamp=getTimeStamp()
+        loss_record_path='/home/wu_tian_ci/GAFL/recoder/loss_value'
+        t_path=time_stamp[0:8]
+        loss_record_path_=os.path.join(loss_record_path,t_path)
+        if not os.path.exists(loss_record_path_):
+            os.mkdir(loss_record_path_)
+        loss_record_path=os.path.join(loss_record_path_,time_stamp[8:12]+'loss.txt')
+        if not os.path.exists(loss_record_path):
+            f=open(loss_record_path,'w')
+            f.write('begin to write\n')
+            f.write('lr: '+str(args.lr)+' '+'epoch:'+str(args.epoch)+' '+args.sup+'\n')
+            f.close()
+            if not os.path.exists(os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12])):
+                os.makedirs(os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12]))
+            write_config(config,args,[os.path.join(loss_record_path_,time_stamp[8:12]+'train_config_args.txt'),
+                                    os.path.join('/home/wu_tian_ci/GAFL/recoder/checkpoint','train',time_stamp[:8],time_stamp[8:12],
+                                                'config_args.txt')])
     counters=0
+    
     for epoch in range(args.epoch):
         model.train()
-        txt_k=1
-        train_loader=DataLoader(dataset,batch_size=args.batchsize,num_workers=12,shuffle=True)
+        txt_k=0
         with tqdm(total=len(train_loader)) as pbar:
             for batch in train_loader:
                 counters+=1
@@ -359,21 +389,18 @@ def train_oracle_continue(args,pretrain,p):
                 rel_l=rel_l.to(device)
                 label=label.to(device).squeeze()
                 cls_ids=cls_ids.to(device)
+
                 token_tensor=token_tensor.to(device)
                 private_label=private_label.to(device)
                 common_label=common_label.to(device)
                 mask_=mask_.to(device)
 
-                # breakpoint()
-
+                
                 t_ans,m_ans1=model(frames,cls_ids,rel_l,bbx,token_tensor)
-
-
-                # loss=loss1+loss2+loss3+loss4+loss5+loss6
-
                 loss2,loss2_1,=cri(t_ans,label) 
                 loss8,loss8_1=cri(m_ans1,label)
                 loss=loss8+loss2
+                # loss=loss1+loss2+loss3+loss4+loss5+loss6
 
 
 
@@ -381,22 +408,24 @@ def train_oracle_continue(args,pretrain,p):
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_val)
                 optimizer.step()
+                # if local_rank==0:
+                    
                 scheduler.step()
                 pbar.update(1)
 
-
                 loss_str=str(loss8_1)+"_"+str(loss2_1)
                 pbar.set_postfix({"Loss": loss_str})
-                f=open(loss_record_path,'a')
-                f.write('epoch: '+str(epoch)+' K:'+str(txt_k)+' loss :'+loss_str+ '\n')
-                f.close()
-                txt_k+=1
-        evaluator.reset()
-        evaluator2.reset()
-        evaluator3.reset()
-        evaluator4.reset()
-        evaluator4_1.reset()
+                if local_rank==0:
+                    
+                    f=open(loss_record_path,'a')
+                    f.write('epoch: '+str(epoch)+' K:'+str(txt_k)+' loss :'+loss_str+ '\n')
+                    f.close()
+                    txt_k+=1
         model.eval()
+        # common private total
+
+        t_pre,t_lab=[],[]
+        m_pre,m_lab=[],[]
         with torch.no_grad():
             for batch in tqdm(test_loader):
                 frames,bbx,mask,label,cls_ids,cls_l,rel_l,private_label,common_label,token_tensor,mask_=batch
@@ -412,30 +441,34 @@ def train_oracle_continue(args,pretrain,p):
 
                 label=label.to(device).squeeze()
 
-                t_ans,m_ans1=model(frames,cls_ids,rel_l,bbx,token_tensor)
                 
                 if len(label.shape)==1:
                     label.unsqueeze_(0)
-                    t_ans.unsqueeze_(0)
                     common_label.unsqueeze_(0)
                     private_label.unsqueeze_(0)
-                if len(m_ans1.shape)==1:
-                        m_ans1.unsqueeze_(0)
+                t_ans,m_ans1=model(frames,cls_ids,rel_l,bbx,token_tensor)
+                t_pre.append(t_ans)
+                t_lab.append(label)
+                m_pre.append(m_ans1)
+                m_lab.append(label)
 
-                evaluator.process(t_ans,label)
-                evaluator4.process(m_ans1,label)
-                # evaluator4_1.process(m_ans2,label)
+        t_pred = distributed_concat(torch.concat(t_pre, dim=0),len(testts.dataset))
+        t_labe = distributed_concat(torch.concat(t_lab, dim=0),len(testts.dataset))
+        m_pred = distributed_concat(torch.concat(m_pre, dim=0),len(testts.dataset))
+        m_labe = distributed_concat(torch.concat(m_lab, dim=0),len(testts.dataset))
+        if local_rank==0:
+            evaluator.reset()
 
+            evaluator4.reset()
+            evaluator4.process(m_pred,t_labe)
+            evaluator.process(t_pred,m_labe)
             metrics = evaluator.evaluate()
-
             metrics4 = evaluator4.evaluate()
-            # metrics4_1 = evaluator4_1.evaluate()
-        # total_ans acc   common_ans acc
- 
-        acc_str='t:'+str(round(metrics['map']*100,5))+'_o1:'+str(round(metrics4['map']*100,5))
-        save_checkpoint(epoch+1,model,acc_str,optimizer,scheduler,time_stamp,'train')
-        print('saved')
 
+            acc_str='t:'+str(round(metrics['map']*100,5))+'_m:'+str(round(metrics4['map']*100,5))       
+            save_checkpoint(epoch+1,model.module,acc_str,optimizer,scheduler,time_stamp,'train')
+            print('saved')
+  
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description="Packs PIL images as HDF5.")
@@ -486,6 +519,7 @@ if __name__=='__main__':
             type=float,
             default=5.0,
             help="The gradient clipping value.",
+            
         )
     parser.add_argument(
             "--wr",
@@ -565,7 +599,25 @@ if __name__=='__main__':
             default=.2,
             help="reconstruction margin",
         )
-    set_seed()
+    parser.add_argument(
+        "--p_index",
+        type=int,
+        default=0,
+        help="continue path",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=3407,
+        help="continue path",
+    )
+    parser.add_argument(
+        "--normtype",
+        type=int,
+        default=0,
+        help="normtype",
+    )
+    
     torch.distributed.init_process_group("nccl")
     args = parser.parse_args()
     # test_(args,False)
@@ -573,9 +625,10 @@ if __name__=='__main__':
     if args.tp ==0:
         train_oracle(args,False)
     elif args.tp==1:
+        print('continue')
         # p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250327/1238/20_t:61.87185_c:88.61021_p:58.9198_o1:59.48385.pth'
-        p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250407/1849/20_t:56.0987_c:98.34421_p:53.22037.pth'
-        train_oracle_continue(args,False,p)
+        p=['/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250421/0010/20_t:60.43938_c:90.17998_p:48.82862.pth']
+        train_oracle_continue(args,False,p[args.p_index])
     else:
         raise NotImplementedError
     # train_text2(args) 
