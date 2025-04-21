@@ -20,7 +20,7 @@ recoder
 recoder/
 RoIAlign.pytorch-master
 GAFL/RoIAlign.pytorch-master/
-scripts
+/scripts
 scripts/
 torch_extra
 torch_extra/
