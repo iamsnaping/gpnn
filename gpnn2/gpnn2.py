@@ -19,7 +19,7 @@ from gpnn2.UpdateFunction import UpdateFunction
 import einops
 from torch_geometric import nn as tnn
 from myutils.common import MLPs
-from gpnn2.gpnnutil import (GlobalNorm2,GlobalNorm)
+from gpnn2.gpnnutil import (GlobalNorm2,GlobalNorm,GlobalNorm3,GlobalNorm4)
 
 
 class GPNNCell(torch.nn.Module):
@@ -100,30 +100,36 @@ class GPNNCell4(torch.nn.Module):
     def __init__(self,config):
         super(GPNNCell4, self).__init__()
         self.normtype=config.normtype
-        self.message_fun = MessageFunction('linear_concat')
-        self.edge_fun=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims*3,config.dims),nn.GELU(),
-                                    nn.Dropout(config.dropout),nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
+        # self.message_fun = MessageFunction('linear_concat')
+        self.message_fun=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims*2,config.dims),nn.GELU())
+        self.edge_fun=nn.Sequential(nn.Linear(config.dims*3,config.dims),nn.GELU(),nn.Dropout(config.dropout),
+                                    nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
 
-        self.link_fun = LinkFunction('one_edge')
+        # self.link_fun = LinkFunction('one_edge')
+        self.link_fun=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims,1),nn.Sigmoid())
 
         self.residual=tnn.MessageNorm(learn_scale=True)
 
 
         self.residual_obj=tnn.MessageNorm(learn_scale=True)
         if self.normtype==0:
-            print('global norm')
             self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm(config.dims,1,config.worldsize),nn.GELU())
             self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm(config.dims,9,config.worldsize),nn.GELU())
         elif self.normtype==1:
-            print('batch norm')
-            self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),nn.BatchNorm2d(16),nn.GELU())
-            self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),nn.BatchNorm2d(16),nn.GELU())
+            self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),nn.BatchNorm2d(config.frames),nn.GELU())
+            self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),nn.BatchNorm2d(config.frames),nn.GELU())
         elif self.normtype==2:
-            print('global norm2')
+            # pass
+            raise RuntimeError('deprecated norm')
             self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm2(config.dims,1,config.worldsize),nn.GELU())
             self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm2(config.dims,9,config.worldsize),nn.GELU())   
-
-        self.merging=nn.Sequential(nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
+        elif self.normtype==3:
+            self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm3(config.dims,1,config.worldsize),nn.GELU())
+            self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm3(config.dims,9,config.worldsize),nn.GELU())   
+        elif self.normtype==4:
+            self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm4(config.dims,1,config.worldsize),nn.GELU())
+            self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm4(config.dims,9,config.worldsize),nn.GELU())   
+        self.merging=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
 
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=768,
@@ -170,12 +176,13 @@ class GPNNCell4(torch.nn.Module):
             self.edges.append(weight_edge.cpu().detach())
         node_features=torch.cat([human_features,obj_features],dim=-2)
 
-        m_v = self.message_fun(node_features, node_features, tmp_edge)
+        # m_v = self.message_fun(node_features, node_features, tmp_edge)
+        m_v=self.message_fun(torch.cat([node_features,tmp_edge],dim=-1))
         m_v=self.merging(m_v)
         weight_edge=weight_edge.expand_as(m_v)
         # if mask is not None:
         #     breakpoint()
-        edge_weighted=(weight_edge*m_v)
+        edge_weighted=weight_edge*m_v
         edge_weighted_human=edge_weighted[:,:,:N,:]
         edge_weighted_obj=edge_weighted[:,:,N:,:]
         edge_weighted_human=torch.sum(edge_weighted_human,-2,keepdim=True)

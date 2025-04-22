@@ -627,7 +627,7 @@ if __name__=='__main__':
     elif args.tp==1:
         print('continue')
         # p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250327/1238/20_t:61.87185_c:88.61021_p:58.9198_o1:59.48385.pth'
-        p=['/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250421/0010/20_t:60.43938_c:90.17998_p:48.82862.pth']
+        p=['/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250421/1510/20_t:60.43938_c:90.17998_p:48.82862.pth']
         train_oracle_continue(args,False,p[args.p_index])
     else:
         raise NotImplementedError

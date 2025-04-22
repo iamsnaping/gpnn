@@ -72,7 +72,8 @@ class GPFPlus(nn.Module):
             self.tokens=nn.Linear(config.cls.ag,config.dims*config.finetune.p_nums)
             self.ptokens=nn.Linear(config.cls.ag,config.dims)
         # global:1 human:1 obj:9
-        self.net=nn.Linear(config.dims,config.finetune.p_nums,nn.Sigmoid())
+        # self.net=nn.Sequential(nn.Linear(config.dims,config.dims//4),nn.GELU(),nn.Linear(config.dims//4,config.finetune.p_nums),nn.Sigmoid())
+        self.net=nn.Sequential(nn.Linear(config.dims,config.finetune.p_nums),nn.Sigmoid())
 
     def get_prompt(self,X,task_id,detach=False):
         b,f,n,d=X.shape
