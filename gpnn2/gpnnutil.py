@@ -12,7 +12,7 @@ from torch_scatter import scatter_mean
 
 
 
-# global norm dims
+# global frame node norm
 class GlobalNorm(torch.nn.Module):
 
     def __init__(self, dims: int, dim2:int,worldsize:int,momentum: int =0.1, eps: float = 1e-5):
@@ -113,7 +113,7 @@ class GlobalNorm2(torch.nn.Module):
     def __repr__(self):
         return f'{self.__class__.__name__}({self.dims})'
 
-# global batch norm
+# global batch norm/global mean real-time var
 class GlobalNorm3(torch.nn.Module):
 
     def __init__(self, dims: int, dim2:int,worldsize:int,momentum: int =0.1, eps: float = 1e-5):
@@ -157,7 +157,7 @@ class GlobalNorm3(torch.nn.Module):
     def __repr__(self):
         return f'{self.__class__.__name__}({self.dims})'
 
-# global batch frame norm
+# global batch frame norm/global mean real-time var
 class GlobalNorm4(torch.nn.Module):
 
     def __init__(self, dims: int, dim2:int,worldsize:int,momentum: int =0.1, eps: float = 1e-5):
@@ -188,7 +188,6 @@ class GlobalNorm4(torch.nn.Module):
                     dist.all_reduce(global_mean, op=dist.ReduceOp.SUM)
                     global_mean = global_mean / self.worldsize  
                 self.global_mean.mul_(1-self.momentum).add_(self.momentum*global_mean)
-
         else:
             global_mean=self.global_mean
 

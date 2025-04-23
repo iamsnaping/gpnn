@@ -2,12 +2,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn.inits import glorot
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from common import FFN
 
 from omegaconf import OmegaConf
 
 def load_config(path='/home/wu_tian_ci/GAFL/configs/model.yaml'):
     config= OmegaConf.load(path)
     return config
+
 
 # class GPFplusAtt(nn.Module):
 #     # in channel dims of tensor p_num
@@ -72,36 +77,29 @@ class GPFPlus(nn.Module):
             self.tokens=nn.Linear(config.cls.ag,config.dims*config.finetune.p_nums)
             self.ptokens=nn.Linear(config.cls.ag,config.dims)
         # global:1 human:1 obj:9
-        # self.net=nn.Sequential(nn.Linear(config.dims,config.dims//4),nn.GELU(),nn.Linear(config.dims//4,config.finetune.p_nums),nn.Sigmoid())
-        self.net=nn.Sequential(nn.Linear(config.dims,config.finetune.p_nums),nn.Sigmoid())
+        # filtter
+        self.net=nn.Sequential(nn.Linear(config.dims*2,config.dims),nn.LayerNorm(config.dims),nn.GELU(),
+                               nn.Dropout(config.dropout),nn.Linear(config.dims,config.finetune.p_nums),
+                               nn.Tanh())
+        self.prompt_net=nn.Sequential(nn.Linear(config.dims*2,config.dims),nn.GELU(),nn.Dropout(config.dropout),
+                                      nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims),nn.GELU())
+
 
     def get_prompt(self,X,task_id,detach=False):
         b,f,n,d=X.shape
-        # batch rels
-        task_id=task_id.unsqueeze(1).unsqueeze(1).repeat(1,f,n,1)
-        # breakpoint()
+        task_id=task_id.unsqueeze(1).unsqueeze(1).expand(-1,f,n,-1)
         if self.flag:
             task_token=self.ptokens(task_id)
-            # task_token=self.p_linear(torch.sum(task_token,dim=-2))+X
             task_token=torch.sum(task_token,dim=-2)+X
-            # breakpoint()
         else:
-            task_token=self.ptokens(task_id)+X
-        # batch frames nodes 1 p_nums
-        # weight=F.softmax(self.net(task_token).unsqueeze(-2),dim=-1)
+            task_token=torch.cat([self.ptokens(task_id),X],dim=-1)
         weight=self.net(task_token).unsqueeze(-2)
-        # breakpoint()
-        # batch frames nodes p_nums dims
         if self.flag:
-            # prompt=self.t_linear(torch.sum(self.tokens(task_id),dim=-2).reshape(b,f,n,self.pnums,self.dims))
             prompt=torch.sum(self.tokens(task_id),dim=-2).reshape(b,f,n,self.pnums,self.dims)
         else:
             prompt=self.tokens(task_id).reshape(b,f,n,self.pnums,self.dims)
-        # breakpoint()
-        # prompt=self.tokens(task_id).reshape(b,f,n,self.pnums,self.dims)
-        # batch frames nodes 1 dims
         prompt=weight@prompt
-        prompt=prompt.squeeze(-2)
+        prompt=self.prompt_net(torch.cat([prompt.squeeze(-2),X],dim=-1))
         if detach:
             X=X+prompt.detach()
             return prompt.detach()
@@ -110,31 +108,20 @@ class GPFPlus(nn.Module):
         # return X
     def forward(self,X,task_id,detach=False):
         b,f,n,d=X.shape
-        # batch rels
-        task_id=task_id.unsqueeze(1).unsqueeze(1).repeat(1,f,n,1)
-        # breakpoint()
+        task_id=task_id.unsqueeze(1).unsqueeze(1).expand(-1,f,n,-1)
         if self.flag:
             task_token=self.ptokens(task_id)
-            # task_token=self.p_linear(torch.sum(task_token,dim=-2))+X
             task_token=torch.sum(task_token,dim=-2)+X
-            # breakpoint()
         else:
-            task_token=self.ptokens(task_id)+X
-        # batch frames nodes 1 p_nums
-        # weight=F.softmax(self.net(task_token).unsqueeze(-2),dim=-1)
+            task_token=torch.cat([self.ptokens(task_id),X],dim=-1)
+        # print('task_token',task_token.shape)
         weight=self.net(task_token).unsqueeze(-2)
-        # breakpoint()
-        # batch frames nodes p_nums dims
         if self.flag:
-            # prompt=self.t_linear(torch.sum(self.tokens(task_id),dim=-2).reshape(b,f,n,self.pnums,self.dims))
             prompt=torch.sum(self.tokens(task_id),dim=-2).reshape(b,f,n,self.pnums,self.dims)
         else:
             prompt=self.tokens(task_id).reshape(b,f,n,self.pnums,self.dims)
-        # breakpoint()
-        # prompt=self.tokens(task_id).reshape(b,f,n,self.pnums,self.dims)
-        # batch frames nodes 1 dims
         prompt=weight@prompt
-        prompt=prompt.squeeze(-2)
+        prompt=self.prompt_net(torch.cat([prompt.squeeze(-2),X],dim=-1))
         if detach:
             X=X+prompt.detach()
         else:

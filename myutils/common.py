@@ -67,22 +67,21 @@ class DynamicFlatter(nn.Module):
                  dropout=0.1,eps=1e-5):
         super().__init__()
         self.dims=in_dim
+        self.gamma=2
+        self.eps=eps
         # score net
-
         # frame-level
-        self.pj1=FFN(in_dim,eps,in_dim*4,dropout)
+        self.pj1=nn.Sequential(nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim,in_dim))
+        self.pjnorm1=nn.LayerNorm(in_dim,eps=eps)
         # video-level
-        self.pj2=FFN(in_dim,eps,in_dim*4,dropout)
-        # self.pj2_2=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU())
-
+        self.pj2=nn.Sequential(nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim,in_dim))
+        self.pjnorm2=nn.LayerNorm(in_dim,eps=eps)
         # # frame-level
         self.score1=nn.Sequential(nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),
                                   nn.GELU(),nn.Linear(in_dim//4,1),nn.Sigmoid())
         # video-level
         self.score2=nn.Sequential(nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),
                                   nn.GELU(),nn.Linear(in_dim//4,1),nn.Sigmoid())
-        
-
         # fusion
         self.f1=FFN(in_dim,eps,in_dim*4,dropout)
         # self.f1=MLP(in_dim,in_dim,dropout,eps)
@@ -104,21 +103,23 @@ class DynamicFlatter(nn.Module):
         return self.f2.weight
         
     
+    def normalize_score(self,score):
+        score=score**self.gamma
+        score=score/(score.max(dim=-2,keepdim=True)[0]+self.eps)
+        return score
+    
     # batch frame nodes dims
     def forward(self,X):
         b,f,n,d=X.shape
-        frame_level=self.pj1(X)
-
-
-
-        frame_scores=self.score1(frame_level)
+        frame_level=self.pjnorm1(self.pj1(X)+X)
+        frame_scores=self.normalize_score(self.score1(frame_level))
         X=X*frame_scores
         X=torch.sum(X,dim=-2)
         # batch frame dims
         f1=self.f1(X)
 
-        video_level=self.pj2(f1)
-        video_scores=self.score2(video_level)
+        video_level=self.pjnorm2(self.pj2(f1)+f1)
+        video_scores=self.normalize_score(self.score2(video_level))
         f1=f1*video_scores
         f1=torch.sum(f1,dim=-2)
         f2=self.f2(f1)
@@ -189,13 +190,13 @@ class GateFusion(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.score1=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims*2,1),nn.Sigmoid())
-        self.score2=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims*2,1),nn.Sigmoid())
+        # self.score2=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims*2,1),nn.Sigmoid())
     
     def forward(self,X1,X2):
         X=torch.cat([X1,X2],dim=-1)
         score1=self.score1(X)
-        score2=self.score2(X)
-        return X1*score1+score2*X2
+        # score2=self.score2(X)
+        return X1*score1+(1-score1)*X2
 
 
 class MLP(nn.Module):

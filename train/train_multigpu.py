@@ -93,7 +93,11 @@ def reduce_mean(name,tensor, nprocs):  # 用于平均所有gpu上的运行结果
 def load_model_dict(p,model,s=False):
     checkpoint=torch.load(p,'cpu')
     model_weight=checkpoint['model']
-    model.load_state_dict(model_weight,strict=s)
+    filtered_weights = {
+    k: v for k, v in model_weight.items() 
+    if k in model.state_dict() and v.shape == model.state_dict()[k].shape
+    }
+    model.load_state_dict(filtered_weights,strict=s)
     return model
 
 
@@ -333,9 +337,9 @@ def train_oracle_continue(args,pretrain,p):
     device = torch.device(local_rank)
     model=GPNNMix4(config,flag=pretrain,train_stage=args.stage).to(device)
 
-    model=load_model_dict(p,model,True)
+    model=load_model_dict(p,model,False)
     model.apply(weight_init_dis)
-    model=torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],output_device=local_rank,find_unused_parameters=False)
+    model=torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],output_device=local_rank,find_unused_parameters=True)
     num_batches = len(dataset) // (args.batchsize*3)
     
     cri=Criterion(config)
@@ -627,7 +631,9 @@ if __name__=='__main__':
     elif args.tp==1:
         print('continue')
         # p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250327/1238/20_t:61.87185_c:88.61021_p:58.9198_o1:59.48385.pth'
-        p=['/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250421/1510/20_t:60.43938_c:90.17998_p:48.82862.pth']
+        p=['/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250421/2216/20_t:62.84535_c:90.93274_p:48.0783.pth',
+           '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250422/1644/20_t:63.65769_c:90.90683_p:44.22294.pth',
+           '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250423/0323/20_t:62.25515_c:91.66813_p:47.8472.pth']
         train_oracle_continue(args,False,p[args.p_index])
     else:
         raise NotImplementedError

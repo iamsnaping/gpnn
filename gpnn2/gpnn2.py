@@ -1,12 +1,3 @@
-"""
-Created on Oct 07, 2017
-
-@author: Siyuan Qi
-
-Description of the file.
-
-"""
-
 import os
 
 import torch
@@ -15,7 +6,7 @@ import torch.nn as nn
 import torch.autograd
 from gpnn2.MessageFunction import MessageFunction
 from gpnn2.LinkFunction import LinkFunction
-from gpnn2.UpdateFunction import UpdateFunction
+
 import einops
 from torch_geometric import nn as tnn
 from myutils.common import MLPs
@@ -100,12 +91,10 @@ class GPNNCell4(torch.nn.Module):
     def __init__(self,config):
         super(GPNNCell4, self).__init__()
         self.normtype=config.normtype
-        # self.message_fun = MessageFunction('linear_concat')
         self.message_fun=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims*2,config.dims),nn.GELU())
         self.edge_fun=nn.Sequential(nn.Linear(config.dims*3,config.dims),nn.GELU(),nn.Dropout(config.dropout),
                                     nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
 
-        # self.link_fun = LinkFunction('one_edge')
         self.link_fun=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims,1),nn.Sigmoid())
 
         self.residual=tnn.MessageNorm(learn_scale=True)
@@ -361,7 +350,7 @@ class GPNN4(nn.Module):
     def __init__(self, config,layer):
         super().__init__()
         self.layer=layer
-
+        self.norm=nn.LayerNorm(config.dims)
         self.gpnn=nn.ModuleList()
         for i in range(self.layer):
             self.gpnn.append(GPNNCell4(config))
@@ -378,7 +367,9 @@ class GPNN4(nn.Module):
         for layer in self.gpnn:
             layer.visual=flag
 
-
+    def train_set(self):
+        for param in self.norm.parameters():
+            param.requires_grad_(True)
     # node features batch frames nodes dims
     # mask: batch frame node -> (batch node) frame
     def forward(self,node_features,obj_feature,edge_feature,prompt=None,task_id=None,mask=None,tfm_mask=None):

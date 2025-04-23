@@ -62,3 +62,6 @@ __pychache__/
 *.pyc
 /mytest/
 /mytest
+/gpnn2/LinkFunction.py
+/gpnn2/MessageFunction.py
+/gpnn2/UpdateFunction.py
