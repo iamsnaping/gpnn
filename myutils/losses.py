@@ -97,7 +97,8 @@ class SeperationLoss(Loss):
         sigma1 = torch.sqrt(torch.mean(x1.pow(2)))
         sigma2 = torch.sqrt(torch.mean(x2.pow(2)))
         # margin=0
-        corr = torch.mean(F.relu(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2)-margin))
+        # corr = torch.mean(F.relu(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2)-margin))
+        corr = F.relu(torch.mean(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2))-margin)
         # corr=F.relu(torch.abs(torch.mean(x1*x2))/(sigma1*sigma2)-self.margin)
         # corr=torch.mean(F.relu(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2)))
         # breakpoint()

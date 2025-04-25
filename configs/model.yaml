@@ -23,7 +23,7 @@ loss:
     margin: 0.3
 
 temp: 0.1
-dropout: 0.1
+dropout: .1
 eps: 1e-5
 transformer:
   layers: 4
@@ -106,5 +106,7 @@ prompt:
   type: 1
 normtype: 0
 worldsize: 3
+gpfp:
+  detach: False
 
 

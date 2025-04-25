@@ -64,20 +64,18 @@ class GlobalNorm(torch.nn.Module):
         return f'{self.__class__.__name__}({self.dims})'
 
 # graph norm
-# pass
 class GlobalNorm2(torch.nn.Module):
-
     def __init__(self, dims: int, dim2:int,worldsize:int,momentum: int =0.1, eps: float = 1e-5):
         super().__init__()
         self.dims = dims
         self.eps = eps
-        self.weight = torch.nn.Parameter(torch.Tensor(dims))
-        self.bias = torch.nn.Parameter(torch.Tensor(dims))
+        self.weight = torch.nn.Parameter(torch.Tensor(1,1,1,dims))
+        self.bias = torch.nn.Parameter(torch.Tensor(1,1,1,dims))
         self.momentum=momentum
         self.worldsize=worldsize
-        self.mean_scale = torch.nn.Parameter(torch.Tensor(dims))
-        self.register_buffer('global_mean', torch.zeros(dims))
-        self.register_buffer('global_var', torch.ones(dims))
+        self.mean_scale = torch.nn.Parameter(torch.Tensor(1,1,1,dims))
+        self.register_buffer('global_mean', torch.zeros(1,1,1,dims))
+        self.register_buffer('global_var', torch.ones(1,1,1,dims))
         self.reset_parameters()
         
     def reset_parameters(self):
@@ -88,7 +86,7 @@ class GlobalNorm2(torch.nn.Module):
 
     def forward(self, x):
         B, F, N, D = x.shape  
-        global_mean=x.mean(dim=[1,2], keepdim=True)
+        global_mean=x.mean(dim=1, keepdim=True)
         # global_var=x.var(dim=[1,2],unbiased=False,keepdim=True)
         # if self.training:
         #     with torch.no_grad():
@@ -105,7 +103,7 @@ class GlobalNorm2(torch.nn.Module):
         #     global_var=self.global_var
 
         out=x-global_mean*self.mean_scale
-        var=torch.sum(out.pow(2),dim=[1,2])/(F+N-1)
+        var=torch.sum(out.pow(2),dim=1)/(F-1)
         std=(var+self.eps).sqrt()
         return out * self.weight/std +self.bias
 

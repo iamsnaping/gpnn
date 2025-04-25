@@ -2678,14 +2678,13 @@ class GPNNMix4(nn.Module):
         train_modules={
             2: [self.total_pj,self.cls_head,self.m_head],
             8: [self.total_pj,self.cls_head,self.m_head],
-            9: [self.total_pj,self.cls_head,self.m_head]
+            9: [self.total_pj,self.cls_head,self.m_head],
             #2: [self.mffn, self.m_head, self.gf, self.cls_head, self.total_pj]
         }
 
         for module in train_modules.get(self.stage,[]):
             for param in module.parameters():
                 param.requires_grad=True
-        self.gpnn.train_set()
 
     # private common total
     def forward1(self,frames,cls,rel,bbx_list,task_id,mask=None,tfm_mask=None):
@@ -3083,7 +3082,7 @@ class GPNNMix4(nn.Module):
         # rec=
         # t_node_features=
         t_node=self.gf(p_features,c_features)
-
+        # t_node=self.feature_mergin(torch.cat([p_features,c_features],dim=-1))
         t_ans=self.cls_head(self.total_pj(t_node))
         recs=self.recs(t_node)
         

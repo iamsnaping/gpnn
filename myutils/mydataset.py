@@ -685,7 +685,7 @@ class MixAns(Dataset):
 class MixAns2(Dataset):
     def __init__(self,name,sample_each_clip=16,node_nums=10,mapping_type=2,train=True):
         super().__init__()
-        print('mix dt:',mapping_type)
+        # print('mix dt:',mapping_type)
         self.sample_rate=sample_each_clip
         self.node_nums=node_nums
         self.name=name
@@ -1110,7 +1110,7 @@ class InfDataset(Dataset):
 class VisualizeDataset(Dataset):
     def __init__(self,name,sample_each_clip=16,node_nums=10,mapping_type=1,test_i=1,test_j=1):
         super().__init__()
-        print('mix dt:',mapping_type)
+        # print('mix dt:',mapping_type)
         self.sample_rate=sample_each_clip
         self.node_nums=node_nums
         self.name=name

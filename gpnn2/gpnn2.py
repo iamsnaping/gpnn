@@ -96,6 +96,7 @@ class GPNNCell4(torch.nn.Module):
                                     nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
 
         self.link_fun=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims,1),nn.Sigmoid())
+        
 
         self.residual=tnn.MessageNorm(learn_scale=True)
 
@@ -109,7 +110,7 @@ class GPNNCell4(torch.nn.Module):
             self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),nn.BatchNorm2d(config.frames),nn.GELU())
         elif self.normtype==2:
             # pass
-            raise RuntimeError('deprecated norm')
+            # raise RuntimeError('deprecated norm')
             self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm2(config.dims,1,config.worldsize),nn.GELU())
             self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm2(config.dims,9,config.worldsize),nn.GELU())   
         elif self.normtype==3:

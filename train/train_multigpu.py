@@ -43,7 +43,7 @@ import warnings
 # os.environ['OMP_NUM_THREADS'] = '2'
 
 import torch.distributed as dist
-os.environ['CUDA_VISIBLE_DEVICES']="0,1,2"
+os.environ['CUDA_VISIBLE_DEVICES']="0,1,2,3"
 os.environ['OMP_NUM_THREADS'] = '1'
 # def set_seed(seed=3407):
 #     random.seed(seed)
@@ -106,6 +106,7 @@ def train_oracle(args,pretrain):
     config=load_config()
     config.prompt.type=args.prompt
     config.normtype=args.normtype
+    config.gpfp.detach=args.detach
     if dist.is_initialized:
         worldsize=dist.get_world_size()
         config.worldsize=worldsize if worldsize!=-1 else config.worldsize
@@ -134,7 +135,7 @@ def train_oracle(args,pretrain):
     local_rank=args.local_rank
     set_seed(seed=args.seed,local_rank=local_rank)
     device = torch.device(local_rank)
-    num_batches = len(dataset) // (args.batchsize*3)
+    num_batches = len(dataset) // (args.batchsize*worldsize)
     model=GPNNMix4(config,flag=pretrain,train_stage=args.stage).to(device)
 
     model.apply(weight_init_dis)
@@ -308,6 +309,8 @@ def train_oracle_continue(args,pretrain,p):
     config=load_config()
     config.prompt.type=args.prompt
     config.normtype=args.normtype
+    config.gpfp.detach=args.detach
+
     if dist.is_initialized:
         worldsize=dist.get_world_size()
         config.worldsize=worldsize if worldsize!=-1 else config.worldsize
@@ -339,7 +342,7 @@ def train_oracle_continue(args,pretrain,p):
 
     model=load_model_dict(p,model,False)
     model.apply(weight_init_dis)
-    model=torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],output_device=local_rank,find_unused_parameters=True)
+    model=torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],output_device=local_rank,find_unused_parameters=False)
     num_batches = len(dataset) // (args.batchsize*3)
     
     cri=Criterion(config)
@@ -621,6 +624,22 @@ if __name__=='__main__':
         default=0,
         help="normtype",
     )
+    def str2bool(v):
+        if isinstance(v,bool):
+            return v
+        if v.lower() in ('true','True','yes'):
+            return True
+        elif v.lower() in ('no','false','False'):
+            return False
+        else:
+            raise argparse.ArgumentTypeError('Boolean value expected.')
+    # parser.add_argument('-preload',type=str2bool,default=False)
+    parser.add_argument(
+        "--detach",
+        type=str2bool,
+        default=False,
+        help="gpfp detach",
+    )
     
     torch.distributed.init_process_group("nccl")
     args = parser.parse_args()
@@ -633,7 +652,10 @@ if __name__=='__main__':
         # p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250327/1238/20_t:61.87185_c:88.61021_p:58.9198_o1:59.48385.pth'
         p=['/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250421/2216/20_t:62.84535_c:90.93274_p:48.0783.pth',
            '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250422/1644/20_t:63.65769_c:90.90683_p:44.22294.pth',
-           '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250423/0323/20_t:62.25515_c:91.66813_p:47.8472.pth']
+           '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250423/0323/20_t:62.25515_c:91.66813_p:47.8472.pth',
+        #    '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250423/2105/3_t:67.68667_c:90.52902_p:44.11991.pth',
+           '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250424/2149/20_t:62.12856_c:91.54526_p:48.70034.pth',
+           '/home/wu_tian_ci/GAFL/recoder/checkpoint/train/20250423/1748/3_t:69.97251_m:58.60099.pth']
         train_oracle_continue(args,False,p[args.p_index])
     else:
         raise NotImplementedError
