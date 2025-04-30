@@ -17,7 +17,7 @@ loss:
     max_mar: .7
     mw: 1.
   pri: 1.
-  tot: 1.
+  tot: .2
   com: 1.
   cos:
     margin: 0.3
@@ -109,4 +109,4 @@ worldsize: 3
 gpfp:
   detach: False
 
-
+max_epoch: 20

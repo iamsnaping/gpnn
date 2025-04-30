@@ -53,7 +53,7 @@ class ReconstructLoss(Loss):
         # self.loss=nn.KLDivLoss(reduction='sum')
         self.loss=nn.MSELoss(reduction='none')
         self.margin=config.loss.rec.margin
-        self.max_epoch=20
+        self.max_epoch=config.max_epoch
         self.max_margin=config.loss.rec.max_mar
         self.mw=config.loss.rec.mw
         self.step=0
@@ -67,7 +67,8 @@ class ReconstructLoss(Loss):
         # loss=F.relu(self.loss(probs1,probs2)-self.margin)/target.size(0)
         margin=self.max_margin-epoch/self.max_epoch*(self.max_margin-self.margin)*self.mw
         # margin=0
-        loss=torch.mean(F.relu(torch.mean(self.loss(target,reconstruct),dim=(1,2,3))-margin))
+        # loss=torch.mean(F.relu(torch.mean(self.loss(target,reconstruct),dim=(1,2,3))-margin))
+        loss=F.relu(torch.mean(self.loss(target,reconstruct))-margin)
         return loss*self.config.loss.rec.weight,round(loss.item(),2)
 
 # batch frame nodes dims
@@ -76,7 +77,7 @@ class SeperationLoss(Loss):
         self.config=config
         self.margin=config.loss.spe.margin
         self.max_margin=config.loss.spe.max_mar
-        self.max_epoch=20
+        self.max_epoch=config.max_epoch
         self.mw=config.loss.spe.mw
         self.step=0
     
@@ -98,8 +99,8 @@ class SeperationLoss(Loss):
         sigma2 = torch.sqrt(torch.mean(x2.pow(2)))
         # margin=0
         # corr = torch.mean(F.relu(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2)-margin))
-        corr = F.relu(torch.mean(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2))-margin)
-        # corr=F.relu(torch.abs(torch.mean(x1*x2))/(sigma1*sigma2)-self.margin)
+        # corr = F.relu(torch.mean(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2))-margin)
+        corr=F.relu(torch.abs(torch.mean(x1*x2))/(sigma1*sigma2)-margin)
         # corr=torch.mean(F.relu(torch.abs(torch.mean(x1*x2,dim=(1,2,3)))/(sigma1*sigma2)))
         # breakpoint()
         return corr*self.config.loss.spe.weight,round(corr.item(),2)
@@ -157,7 +158,8 @@ class AdapterLoss(nn.Module):
     def forward(self,rel,cls,rel_l,cls_l,epochs):
         cls_loss=self.cls_loss(cls,cls_l)
         rel_loss=self.rel_loss(rel,rel_l)
-        cls_weight=self.cls+(self.cls_max-self.cls)*((epochs+self.epoch_max)/self.epoch_max)
+        # cls_weight=self.cls+(self.cls_max-self.cls)*((epochs+self.epoch_max)/self.epoch_max)
+        cls_weight=self.cls
         return rel_loss*self.rel+cls_loss*cls_weight,round(rel_loss.item(),2),round(cls_loss.item(),2)
 
 

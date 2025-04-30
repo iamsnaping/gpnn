@@ -95,6 +95,8 @@ class GPNNCell4(torch.nn.Module):
         self.edge_fun=nn.Sequential(nn.Linear(config.dims*3,config.dims),nn.GELU(),nn.Dropout(config.dropout),
                                     nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
 
+        # self.link_fun=nn.Sequential(nn.Linear(config.dims,config.dims//4),nn.LayerNorm(config.dims//4),nn.GELU(),
+        #     nn.Dropout(config.dropout),nn.Linear(config.dims//4,1),nn.Sigmoid())
         self.link_fun=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims,1),nn.Sigmoid())
         
 
@@ -135,21 +137,14 @@ class GPNNCell4(torch.nn.Module):
         self.edges=[]
         self.visual=False
 
-        # self._load_link_fun()
-    # edge features [batch frames nodes-1 dims] nodes==edges
-    # human feature [batch frames 1 dims]
-    # obj features [batch frames nodes-1 dims]
+
     def forward(self, human_feature,obj_features,edge_features,mask=None,tfm_mask=None):
         B,F,N,D=obj_features.shape
         human_features=human_feature.repeat(1, 1, N, 1)
 
-        # print('obj,human',human_feature.shape,human_features.shape,obj_features.shape)
-        # breakpoint()
         tmp_edge=self.edge_fun(torch.cat([torch.cat([human_features,edge_features,obj_features],dim=-1), # human-obj
                                           torch.cat([obj_features,edge_features,human_features],dim=-1)],dim=-2))# obj-human
-        # tmp_edge1=self.edge_fun(torch.cat([edge_features,obj_features],dim=-1))
-        # tmp_edge2=self.edge_fun(torch.cat([edge_features,human_features],dim=-1))
-        # tmp_edge=torch.cat([tmp_edge1,tmp_edge2],dim=-2)
+
         if tfm_mask is not None:
             tmp_edge=self.tfm(einops.rearrange(tmp_edge,'b f n d -> (b n) f d'),
                             src_key_padding_mask=tfm_mask)
@@ -157,7 +152,6 @@ class GPNNCell4(torch.nn.Module):
             tmp_edge=self.tfm(einops.rearrange(tmp_edge,'b f n d -> (b n) f d'))
         tmp_edge=einops.rearrange(tmp_edge,'(b n) f d -> b f n d',b=B,n=N*2)
 
-        # breakpoint()
         if mask is not None:
             weight_edge=self.link_fun(tmp_edge)*mask
         else:
@@ -166,22 +160,19 @@ class GPNNCell4(torch.nn.Module):
             self.edges.append(weight_edge.cpu().detach())
         node_features=torch.cat([human_features,obj_features],dim=-2)
 
-        # m_v = self.message_fun(node_features, node_features, tmp_edge)
+
         m_v=self.message_fun(torch.cat([node_features,tmp_edge],dim=-1))
         m_v=self.merging(m_v)
         weight_edge=weight_edge.expand_as(m_v)
-        # if mask is not None:
-        #     breakpoint()
+
         edge_weighted=weight_edge*m_v
         edge_weighted_human=edge_weighted[:,:,:N,:]
         edge_weighted_obj=edge_weighted[:,:,N:,:]
         edge_weighted_human=torch.sum(edge_weighted_human,-2,keepdim=True)
-        # print('human',human_feature.shape,edge_weighted_human.shape)
-        # sum aggregation
-        # node_features=node_features+edge_weighted
+
         human_feature=self.norm(self.residual(human_feature,edge_weighted_human)+human_feature)
         obj_features=self.norm_obj(self.residual_obj(obj_features,edge_weighted_obj)+obj_features)
-        # print('obj,human',human_feature.shape,obj_features.shape)
+
         return human_feature,obj_features
 
 class GPNNCellText(torch.nn.Module):
@@ -351,7 +342,7 @@ class GPNN4(nn.Module):
     def __init__(self, config,layer):
         super().__init__()
         self.layer=layer
-        self.norm=nn.LayerNorm(config.dims)
+        # self.norm=nn.LayerNorm(config.dims)
         self.gpnn=nn.ModuleList()
         for i in range(self.layer):
             self.gpnn.append(GPNNCell4(config))

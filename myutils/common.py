@@ -59,9 +59,6 @@ class Flatter(nn.Module):
         f=self.flatten(f)
         return self.layer2(f)
 
-
-
-
 class DynamicFlatter(nn.Module):
     def __init__(self,in_dim,
                  dropout=0.1,eps=1e-5):
@@ -71,18 +68,30 @@ class DynamicFlatter(nn.Module):
         self.gamma=2
         self.eps=eps
         # frame-level
-        # self.pj1=FFN(in_dim,eps,in_dim*4,dropout)
-        self.pj1=nn.Sequential(nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim,in_dim))
-        # video-level
-        # self.pj2=FFN(in_dim,eps,in_dim*4,dropout)
-        self.pj2=nn.Sequential(nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim,in_dim))
+
+        # self.pj1=nn.Sequential(nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim,in_dim))
+        # # video-level
+
+        # self.pj2=nn.Sequential(nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim,in_dim))
         # self.pj2_2=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU())
 
         # # frame-level
-        self.score1=nn.Sequential(nn.LayerNorm(in_dim),nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),
+        # self.score1=nn.Sequential(nn.LayerNorm(in_dim),nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),
+        #                           nn.GELU(),nn.Linear(in_dim//4,1),nn.Sigmoid())
+        # video-level
+        # self.score2=nn.Sequential(nn.LayerNorm(in_dim),nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),
+        #                           nn.GELU(),nn.Linear(in_dim//4,1),nn.Sigmoid())
+
+        # self.pj1=nn.Sequential(nn.LayerNorm(in_dim),nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim,in_dim))
+        # video-level
+
+        # self.pj2=nn.Sequential(nn.LayerNorm(in_dim),nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim,in_dim))
+        self.pj1=FFN(in_dim,eps,in_dim*4,dropout)
+        self.pj2=FFN(in_dim,eps,in_dim*4,dropout)
+        self.score1=nn.Sequential(nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),
                                   nn.GELU(),nn.Linear(in_dim//4,1),nn.Sigmoid())
         # video-level
-        self.score2=nn.Sequential(nn.LayerNorm(in_dim),nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),
+        self.score2=nn.Sequential(nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),
                                   nn.GELU(),nn.Linear(in_dim//4,1),nn.Sigmoid())
         
 
@@ -114,15 +123,19 @@ class DynamicFlatter(nn.Module):
     # batch frame nodes dims
     def forward(self,X):
         b,f,n,d=X.shape
-        frame_level=self.pj1(X)+X
-        frame_scores=self.normalize_score(self.score1(frame_level))
+        # frame_level=self.pj1(X)+X
+        frame_level=self.pj1(X)
+        # frame_scores=self.normalize_score(self.score1(frame_level))
+        frame_scores=self.score1(frame_level)
         X=X*frame_scores
         X=torch.sum(X,dim=-2)
         # batch frame dims
         f1=self.f1(X)
 
-        video_level=self.pj2(f1)+f1
-        video_scores=self.normalize_score(self.score2(video_level))
+        # video_level=self.pj2(f1)+f1
+        video_level=self.pj2(f1)
+        # video_scores=self.normalize_score(self.score2(video_level))
+        video_scores=self.score2(video_level)
         f1=f1*video_scores
         f1=torch.sum(f1,dim=-2)
         f2=self.f2(f1)
@@ -130,7 +143,6 @@ class DynamicFlatter(nn.Module):
             self.vl_weight.append(video_scores.cpu().detach())
             self.fl_weight.append(frame_scores.cpu().detach())
         return f2
-
 
 class DynamicFlatterWithGate(nn.Module):
     def __init__(self,config,in_dim,
@@ -187,19 +199,30 @@ class DynamicFlatterWithGate(nn.Module):
         f2=self.f2(f1)
         return f2
 
-
-
 class GateFusion(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.score1=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims*2,1),nn.Sigmoid())
-        # self.score2=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims*2,1),nn.Sigmoid())
+        self.share_score=nn.Sequential(nn.Linear(config.dims*2,config.dims),nn.GELU(),nn.Dropout(config.dropout)
+                                        ,nn.Linear(config.dims,config.dims//2),nn.LayerNorm(config.dims//2),nn.GELU())
+        self.score1=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims//2,1),nn.Sigmoid())
+        self.score2=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims//2,1),nn.Sigmoid())
+
+        # self.share_score=nn.Sequential(nn.Linear(config.dims*2,config.dims//2),nn.GELU(),nn.Dropout(config.dropout)
+        #                                 ,nn.Linear(config.dims,config.dims//2),nn.LayerNorm(config.dims//2))
+        # self.score1=nn.Sequential(nn.Linear(config.dims//2,2))
+
+        # self.gate=nn.Sequential(nn.Linear(config.dims//2,1),nn.Sigmoid())
+ 
     
     def forward(self,X1,X2):
+
         X=torch.cat([X1,X2],dim=-1)
-        score1=self.score1(X)
-        # score2=self.score2(X)
-        return X1*score1+(1-score1)*X2
+        share_f=self.share_score(X)
+        score1=self.score1(share_f)
+        score2=self.score2(share_f)
+        # return X1*score1+(1-score1)*X2
+        return (X1*score1+X2*(1-score1))*score2+(1-score2)*(X1+X2)*0.5
+
 
 
 class MLP(nn.Module):

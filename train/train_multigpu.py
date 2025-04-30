@@ -93,17 +93,21 @@ def reduce_mean(name,tensor, nprocs):  # 用于平均所有gpu上的运行结果
 def load_model_dict(p,model,s=False):
     checkpoint=torch.load(p,'cpu')
     model_weight=checkpoint['model']
-    filtered_weights = {
-    k: v for k, v in model_weight.items() 
-    if k in model.state_dict() and v.shape == model.state_dict()[k].shape
-    }
-    model.load_state_dict(filtered_weights,strict=s)
+    # filtered_weights = {
+    # k: v for k, v in model_weight.items() 
+    # if k in model.state_dict() and v.shape == model.state_dict()[k].shape
+    # }
+    # for k,v in model_weight.items():
+    #     if 'pj' in k:
+    #         breakpoint()
+    model.load_state_dict(model_weight,strict=s)
     return model
 
 
 
 def train_oracle(args,pretrain):
     config=load_config()
+    config.max_epoch=args.epoch
     config.prompt.type=args.prompt
     config.normtype=args.normtype
     config.gpfp.detach=args.detach
@@ -141,7 +145,7 @@ def train_oracle(args,pretrain):
     model.apply(weight_init_dis)
     if args.normtype==1:
         model=SyncBatchNorm.convert_sync_batchnorm(model)
-    model=torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],output_device=local_rank,find_unused_parameters=True)
+    model=torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],output_device=local_rank,find_unused_parameters=False)
 
     
     cri=Criterion(config)
@@ -155,7 +159,7 @@ def train_oracle(args,pretrain):
 
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
-        num_warmup_steps=args.warmup * num_batches,
+        num_warmup_steps=args.wr * num_batches,
         num_training_steps=args.epoch * num_batches,
     )
     # total common private middle
@@ -224,7 +228,8 @@ def train_oracle(args,pretrain):
                 d_weight=model.module.get_weight(loss6,loss1)
                 loss5,loss5_1,loss5_2=adapter(rel_ans,cls_ans,rel_l,cls_l,epoch+1)
                 loss3,loss3_1=sloss(c_features,p_features,epoch+1)
-                loss=loss1+loss5+loss6*config.loss.pri*d_weight+loss2+loss3+loss4
+                loss=loss1+loss5+loss6*config.loss.pri*d_weight+loss3+loss4\
+                        +loss2*config.loss.tot
 
 
                 optimizer.zero_grad()
@@ -236,7 +241,8 @@ def train_oracle(args,pretrain):
                 scheduler.step()
                 pbar.update(1)
 
-                loss_str=str(loss1_1)+"_"+str(loss6_1)+"_"+str(loss5_1)+"_"+str(loss5_2)+"_"+str(loss3_1)+"_"+str(loss2_1)+"_"+str(loss4_1)
+                loss_str=str(loss1_1)+"_"+str(loss6_1)+"_"+str(loss5_1)+"_"+str(loss5_2)+"_"+str(loss3_1)+"_"+str(loss4_1)\
+                        +'_t:'+str(loss2_1)
                 pbar.set_postfix({"Loss": loss_str})
                 if local_rank==0:
                     
@@ -277,9 +283,10 @@ def train_oracle(args,pretrain):
                     private_label.unsqueeze_(0)
                 c_pre.append(c_ans)
                 p_pre.append(p_ans)
-                t_pre.append(t_ans)
+                
                 c_lab.append(common_label)
                 p_lab.append(private_label)
+                t_pre.append(t_ans)
                 t_lab.append(label)
 
 
@@ -295,13 +302,16 @@ def train_oracle(args,pretrain):
             evaluator3.reset()
             evaluator4.reset()
             evaluator2.process(c_pred,c_labe)
+            metrics2 = evaluator2.evaluate()
             evaluator3.process(p_pred,p_labe)
+            metrics3 = evaluator3.evaluate()
             evaluator.process(t_pred,t_labe)
             metrics = evaluator.evaluate()
-            metrics2 = evaluator2.evaluate()
-            metrics3 = evaluator3.evaluate()
+
+
             if args.stage in [1,6,7]:
-                acc_str='t:'+str(round(metrics['map']*100,5))+'_c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))            
+                acc_str='t:'+str(round(metrics['map']*100,5))+'_c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))   
+                # acc_str='c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))             
             save_checkpoint(epoch+1,model.module,acc_str,optimizer,scheduler,time_stamp,'pretrain')
             print('saved')
 
@@ -650,12 +660,22 @@ if __name__=='__main__':
     elif args.tp==1:
         print('continue')
         # p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250327/1238/20_t:61.87185_c:88.61021_p:58.9198_o1:59.48385.pth'
-        p=['/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250421/2216/20_t:62.84535_c:90.93274_p:48.0783.pth',
-           '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250422/1644/20_t:63.65769_c:90.90683_p:44.22294.pth',
-           '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250423/0323/20_t:62.25515_c:91.66813_p:47.8472.pth',
-        #    '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250423/2105/3_t:67.68667_c:90.52902_p:44.11991.pth',
-           '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250424/2149/20_t:62.12856_c:91.54526_p:48.70034.pth',
-           '/home/wu_tian_ci/GAFL/recoder/checkpoint/train/20250423/1748/3_t:69.97251_m:58.60099.pth']
+        # p=['/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250421/2216/20_t:62.84535_c:90.93274_p:48.0783.pth',
+        #    '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250422/1644/20_t:63.65769_c:90.90683_p:44.22294.pth',
+        #    '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250423/0323/20_t:62.25515_c:91.66813_p:47.8472.pth',
+        # #    '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250423/2105/3_t:67.68667_c:90.52902_p:44.11991.pth',
+        #    '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250424/2149/20_t:62.12856_c:91.54526_p:48.70034.pth',
+        #    '/home/wu_tian_ci/GAFL/recoder/checkpoint/train/20250423/1748/3_t:69.97251_m:58.60099.pth',
+        #    '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250425/1842/10_t:58.53395_c:89.11932_p:46.1557.pth',
+        #    '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250426/0207/15_t:58.9991_c:90.61916_p:46.12966.pth']
+        
+        # p=['/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250426/1114/20_c:89.27432_p:44.82027.pth',
+        #    '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250426/1818/20_c:89.50764_p:44.66768.pth',
+        #    '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250427/0121/20_c:86.9032_p:43.14596.pth']
+        # p=['/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250427/2219/20_c:90.01916_p:45.2115.pth']
+
+        p=['/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250429/1705/10_t:62.12935_c:91.01316_p:45.25642.pth',
+           '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250430/1257/5_t:64.01655_c:90.7591_p:47.04908.pth']
         train_oracle_continue(args,False,p[args.p_index])
     else:
         raise NotImplementedError

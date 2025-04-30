@@ -688,6 +688,7 @@ class MixAns2(Dataset):
         # print('mix dt:',mapping_type)
         self.sample_rate=sample_each_clip
         self.node_nums=node_nums
+        
         self.name=name
         self.train=train
         self.mapping_type=mapping_type

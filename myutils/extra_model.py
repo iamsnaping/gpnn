@@ -2593,9 +2593,13 @@ class GPNNMix4(nn.Module):
         print('train_stage',self.stage)
         if self.stage in [3,5]:
             self.model_init1(config)
-        elif self.stage in [2,1,4,6,7,8,9,10,11,12,13]:
+        elif self.stage in [2,1,4,6,7,8,10,11,12,13]:
             self.model_init1(config)
             self.model_init2(config)
+        elif self.stage in [9]:
+            self.model_init1(config)
+            self.model_init2(config)
+            self.model_init3(config)
         else:
             raise NotImplementedError
         self.freeze()
@@ -2618,7 +2622,7 @@ class GPNNMix4(nn.Module):
 
         self.mffn=FFN(config.dims,config.eps,config.dims*4,config.dropout)
         
-        self.m_head=Head(config.dims,config.eps,config.dropout,config.cls.ag)
+        
         self.bbx_linear=nn.Sequential(nn.Linear(4,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
         self.fusion=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
         self.rel_mlp=MLPCLS(config.dims,config.cls.rel,config.dropout,config.eps)
@@ -2628,7 +2632,8 @@ class GPNNMix4(nn.Module):
         self.obj_mlp=MLPCLS(config.dims,config.cls.obj,config.dropout,config.eps)
         self.adapter=CLIPAdapter(config)
         self.pj=ProjectionHeadFT(config.dims,config.eps,config.dims*4,config.dropout)
-        self.pos = nn.Parameter(torch.zeros(1,16,1,768))
+        self.pos = nn.Parameter(torch.zeros(1,config.frames,1,config.dims))
+        # self.mergin_feature=nn.Sequential(nn.Linear(config.dims*2,config.dims),nn.LayerNorm(config.dims),nn.GELU())
 
     # stage 2/3
     def model_init2(self,config):
@@ -2646,16 +2651,18 @@ class GPNNMix4(nn.Module):
 
         self.mffn2=FFN(config.dims,config.eps,config.dims*4,config.dropout)
         self.mffn3=FFN(config.dims,config.eps,config.dims*4,config.dropout)
-        self.p_head=Head(config.dims,config.eps,config.dropout,config.cls.ag+1)
-        self.c_head=Head(config.dims,config.eps,config.dropout,config.cls.ag+1)
-
-        # front embedding
-        
-
+        if self.stage not in [9]:
+            self.p_head=Head(config.dims,config.eps,config.dropout,config.cls.ag+1)
+            self.c_head=Head(config.dims,config.eps,config.dropout,config.cls.ag+1)
         self.recs=ReconstructNetwork(config)
         self.total_pj=FFN(config.dims,config.eps,config.dims*4,config.dropout)
         self.gf=GateFusion(config)
         self.cls_head=Head(config.dims,config.eps,config.dropout,config.cls.ag)
+
+    # stage 2/3
+    def model_init3(self,config):
+        self.m_head=Head(config.dims,config.eps,config.dropout,config.cls.ag)
+
 
     def get_weight(self,p_loss,c_loss):
         if self.stage in [6]:
@@ -3082,6 +3089,7 @@ class GPNNMix4(nn.Module):
         # rec=
         # t_node_features=
         t_node=self.gf(p_features,c_features)
+        # t_node=self.mergin_feature(torch.cat([p_features,c_features],dim=-1))
         # t_node=self.feature_mergin(torch.cat([p_features,c_features],dim=-1))
         t_ans=self.cls_head(self.total_pj(t_node))
         recs=self.recs(t_node)
@@ -3089,7 +3097,6 @@ class GPNNMix4(nn.Module):
 
         return c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans
     # total middle
-
   # single branch
     def forward8(self,frames,cls,rel,bbx_list,task_id,mask=None,tfm_mask=None):
         with torch.no_grad():
@@ -3168,61 +3175,61 @@ class GPNNMix4(nn.Module):
         # breakpoint()
         Nums=Nums
         # bbx_list=bbx_list[:,:,1:,:]
-        with torch.no_grad():
-            bbx=self.bbx_linear(bbx_list)
-            # breakpoint()
-            cls_feature=self.cls_embed(cls)
-            rel_feature=self.rel_embed(rel)
-            
+       
+        bbx=self.bbx_linear(bbx_list)
+        # breakpoint()
+        cls_feature=self.cls_embed(cls)
+        rel_feature=self.rel_embed(rel)
+        
 
-            pos=self.pos.repeat(B,1,Nums,1)
-            adapter_feature=self.adapter(frames)
-            # supervised
-            # pre_feature=
-    
-            # frames_features=
-            # projection head
-            frames_features=self.pj(self.tse(self.fusion(adapter_feature+bbx)+pos,tfm_mask))
-            # breakpoint()
+        pos=self.pos.repeat(B,1,Nums,1)
+        adapter_feature=self.adapter(frames)
+        # supervised
+        # pre_feature=
 
-            # total features for a consist edge cls
-            human_obj_feature=frames_features[:,:,1:,:]
-            # supevised by adapter feature
-            # scene graph
-            human_obj_feature=human_obj_feature+cls_feature
-            #no scenegraph
-            # human_obj_feature=human_obj_feature
-            human_feature=human_obj_feature[:,:,0,:].unsqueeze(-2)
-            human_features=human_feature.repeat(1,1,Nums-2,1)
-            obj_feature=human_obj_feature[:,:,1:,:]
-            global_feature=frames_features[:,:,0,:].unsqueeze(-2).repeat(1,1,Nums-2,1)
-            edge_feature=self.edge_fun(torch.cat([human_features,global_feature,obj_feature],dim=-1))
+        # frames_features=
+        # projection head
+        frames_features=self.pj(self.tse(self.fusion(adapter_feature+bbx)+pos,tfm_mask))
+        # breakpoint()
 
-            # print('shap',human_features.shape,global_feature.shape,obj_feature.shape)
+        # total features for a consist edge cls
+        human_obj_feature=frames_features[:,:,1:,:]
+        # supevised by adapter feature
+        # scene graph
+        human_obj_feature=human_obj_feature+cls_feature
+        #no scenegraph
+        # human_obj_feature=human_obj_feature
+        human_feature=human_obj_feature[:,:,0,:].unsqueeze(-2)
+        human_features=human_feature.repeat(1,1,Nums-2,1)
+        obj_feature=human_obj_feature[:,:,1:,:]
+        global_feature=frames_features[:,:,0,:].unsqueeze(-2).repeat(1,1,Nums-2,1)
+        edge_feature=self.edge_fun(torch.cat([human_features,global_feature,obj_feature],dim=-1))
 
-            # scene graph
-            edge_feature=edge_feature+rel_feature
+        # print('shap',human_features.shape,global_feature.shape,obj_feature.shape)
 
-            human_obj_feature=self.mffn(human_obj_feature)
+        # scene graph
+        edge_feature=edge_feature+rel_feature
 
-            
-            task_id2=(~task_id.bool()).float()
-            p_f=self.mffn2(self.pgpfp(human_obj_feature,task_id2))
-            c_f=self.mffn3(self.cgpfp(human_obj_feature,task_id))
-            
-            p_human_feature,p_obj_feature=self.gpnn(p_f[:,:,0,:].unsqueeze(-2),p_f[:,:,1:,:],edge_feature,self.pgpfp,task_id2,mask,tfm_mask)
+        human_obj_feature=self.mffn(human_obj_feature)
 
-            c_human_feature,c_obj_feature=self.gpnn(c_f[:,:,0,:].unsqueeze(-2),c_f[:,:,1:,:],edge_feature,self.cgpfp,task_id,mask,tfm_mask)
+        
+        task_id2=(~task_id.bool()).float()
+        p_f=self.mffn2(self.pgpfp(human_obj_feature,task_id2))
+        c_f=self.mffn3(self.cgpfp(human_obj_feature,task_id))
+        
+        p_human_feature,p_obj_feature=self.gpnn(p_f[:,:,0,:].unsqueeze(-2),p_f[:,:,1:,:],edge_feature,self.pgpfp,task_id2,mask,tfm_mask)
 
-
-            p_features=torch.cat([p_human_feature,p_obj_feature],dim=-2)
-
-            c_features=torch.cat([c_human_feature,c_obj_feature],dim=-2)
+        c_human_feature,c_obj_feature=self.gpnn(c_f[:,:,0,:].unsqueeze(-2),c_f[:,:,1:,:],edge_feature,self.cgpfp,task_id,mask,tfm_mask)
 
 
-            # rec=
-            # t_node_features=
-            t_node=self.gf(p_features,c_features)
+        p_features=torch.cat([p_human_feature,p_obj_feature],dim=-2)
+
+        c_features=torch.cat([c_human_feature,c_obj_feature],dim=-2)
+
+
+        # rec=
+        # t_node_features=
+        t_node=self.gf(p_features,c_features)
         t_ans=self.cls_head(self.total_pj(t_node))
         m_ans=self.m_head(human_obj_feature)
         
@@ -3521,22 +3528,7 @@ class GPNNMix4(nn.Module):
                  self.forward12,
                  self.forward13]
         return forwards[self.stage-1](frames,cls,rel,bbx_list,task_id,mask,tfm_mask)
-        if self.stage==1:
-            return self.forward1(frames,cls,rel,bbx_list,task_id,mask,tfm_mask)
-        elif self.stage==2:
-            return self.forward2(frames,cls,rel,bbx_list,task_id)
-        elif self.stage==3:
-            return self.forward3(frames,cls,rel,bbx_list,task_id)
-        elif self.stage==4:
-            return self.forward4(frames,cls,rel,bbx_list,task_id)
-        elif self.stage==5:
-            return self.forward5(frames,cls,rel,bbx_list,task_id)
-        elif self.stage==6:
-            return self.forward6(frames,cls,rel,bbx_list,task_id)
-        elif self.stage==6:
-            return self.forward6(frames,cls,rel,bbx_list,task_id)
-        else:
-            raise NotImplementedError
+
 
 # single/dual path
 

@@ -72,12 +72,9 @@ class GPFPlus(nn.Module):
         self.detach=config.gpfp.detach
         print('gfpf detach',self.detach)
         self.flag=flag
-        if flag:
-            self.tokens=nn.Embedding(config.cls.ag,config.dims*config.finetune.p_nums)
-            self.ptokens=nn.Embedding(config.cls.ag,config.dims)
-        else:
-            self.tokens=(nn.Linear(config.cls.ag,config.dims*config.finetune.p_nums))
-            self.ptokens=nn.Linear(config.cls.ag,config.dims)
+
+        self.tokens=nn.Linear(config.cls.ag,config.dims*config.finetune.p_nums)
+        self.ptokens=nn.Linear(config.cls.ag,config.dims)
         # global:1 human:1 obj:9
         # self.net=nn.Sequential(nn.Linear(config.dims,config.dims//4),nn.GELU(),nn.Linear(config.dims//4,config.finetune.p_nums),nn.Sigmoid())
         # self.net=nn.Sequential(FFN(config.dims,config.eps,config.dims*4,config.dropout),
@@ -85,41 +82,6 @@ class GPFPlus(nn.Module):
         #                        nn.Linear(config.dims//4,config.finetune.p_nums),nn.Sigmoid())
         self.net=nn.Sequential(nn.Linear(config.dims,config.finetune.p_nums),nn.Sigmoid())
         # self.net=nn.Linear(config.dims,config.finetune.p_nums)
-
-    def get_prompt(self,X_in,task_id,detach=False):
-        X=X_in
-        b,f,n,d=X.shape
-        # batch rels
-        task_id=task_id.unsqueeze(1).unsqueeze(1).expand(-1,f,n,-1)
-        # breakpoint()
-        if self.flag:
-            task_token=self.ptokens(task_id)
-            # task_token=self.p_linear(torch.sum(task_token,dim=-2))+X
-            task_token=torch.sum(task_token,dim=-2)+X
-            # breakpoint()
-        else:
-            task_token=self.ptokens(task_id)+X
-        # batch frames nodes 1 p_nums
-        # weight=F.softmax(self.net(task_token).unsqueeze(-2),dim=-1)
-        weight=self.net(task_token).unsqueeze(-2)
-        # breakpoint()
-        # batch frames nodes p_nums dims
-        if self.flag:
-            # prompt=self.t_linear(torch.sum(self.tokens(task_id),dim=-2).reshape(b,f,n,self.pnums,self.dims))
-            prompt=torch.sum(self.tokens(task_id),dim=-2).reshape(b,f,n,self.pnums,self.dims)
-        else:
-            prompt=self.tokens(task_id).reshape(b,f,n,self.pnums,self.dims)
-        # breakpoint()
-        # prompt=self.tokens(task_id).reshape(b,f,n,self.pnums,self.dims)
-        # batch frames nodes 1 dims
-        prompt=weight@prompt
-        prompt=prompt.squeeze(-2)
-        if detach:
-            X=X+prompt.detach()
-            return prompt.detach()
-        else:
-            return prompt
-        # return X
     def forward(self,X_in,task_id,detach=False):
         if self.detach:
             X=X_in.detach()
@@ -129,14 +91,8 @@ class GPFPlus(nn.Module):
         
         # batch rels
         task_id=task_id.unsqueeze(1).unsqueeze(1).repeat(1,f,n,1)
-        # breakpoint()
-        if self.flag:
-            task_token=self.ptokens(task_id)
-            # task_token=self.p_linear(torch.sum(task_token,dim=-2))+X
-            task_token=torch.sum(task_token,dim=-2)+X
-            # breakpoint()
-        else:
-            task_token=self.ptokens(task_id)+X
+
+        task_token=self.ptokens(task_id)+X
         # batch frames nodes 1 p_nums
         # weight=F.softmax(self.net(task_token).unsqueeze(-2),dim=-1)
         weight=self.net(task_token).unsqueeze(-2)
