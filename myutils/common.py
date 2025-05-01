@@ -205,7 +205,7 @@ class GateFusion(nn.Module):
         self.share_score=nn.Sequential(nn.Linear(config.dims*2,config.dims),nn.GELU(),nn.Dropout(config.dropout)
                                         ,nn.Linear(config.dims,config.dims//2),nn.LayerNorm(config.dims//2),nn.GELU())
         self.score1=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims//2,1),nn.Sigmoid())
-        self.score2=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims//2,1),nn.Sigmoid())
+        # self.score2=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims//2,1),nn.Sigmoid())
 
         # self.share_score=nn.Sequential(nn.Linear(config.dims*2,config.dims//2),nn.GELU(),nn.Dropout(config.dropout)
         #                                 ,nn.Linear(config.dims,config.dims//2),nn.LayerNorm(config.dims//2))
@@ -219,9 +219,10 @@ class GateFusion(nn.Module):
         X=torch.cat([X1,X2],dim=-1)
         share_f=self.share_score(X)
         score1=self.score1(share_f)
-        score2=self.score2(share_f)
+        # score2=self.score2(share_f)
         # return X1*score1+(1-score1)*X2
-        return (X1*score1+X2*(1-score1))*score2+(1-score2)*(X1+X2)*0.5
+        return X1*score1+(1-score1)*X2
+        # return (X1*score1+X2*(1-score1))*score2+(1-score2)*(X1+X2)*0.5
 
 
 
