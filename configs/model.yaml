@@ -17,7 +17,8 @@ loss:
     max_mar: .7
     mw: 1.
   pri: 1.
-  tot: .2
+  # 0.2
+  tot: 1.
   com: 1.
   cos:
     margin: 0.3

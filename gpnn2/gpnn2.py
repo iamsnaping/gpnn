@@ -10,7 +10,7 @@ from gpnn2.LinkFunction import LinkFunction
 import einops
 from torch_geometric import nn as tnn
 from myutils.common import MLPs
-from gpnn2.gpnnutil import (GlobalNorm2,GlobalNorm,GlobalNorm3,GlobalNorm4)
+from gpnn2.gpnnutil import (GlobalNorm2,GlobalNorm,GlobalNorm3,GlobalNorm4,GlobalNorm5)
 
 
 class GPNNCell(torch.nn.Module):
@@ -105,14 +105,13 @@ class GPNNCell4(torch.nn.Module):
 
         self.residual_obj=tnn.MessageNorm(learn_scale=True)
         if self.normtype==0:
-            self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm(config.dims,1,config.worldsize),nn.GELU())
-            self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm(config.dims,9,config.worldsize),nn.GELU())
+            self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm5(config.dims,1,config.worldsize),nn.GELU())
+            self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm5(config.dims,9,config.worldsize),nn.GELU())
         elif self.normtype==1:
             self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),nn.BatchNorm2d(config.frames),nn.GELU())
             self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),nn.BatchNorm2d(config.frames),nn.GELU())
         elif self.normtype==2:
-            # pass
-            # raise RuntimeError('deprecated norm')
+            # graph norm
             self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm2(config.dims,1,config.worldsize),nn.GELU())
             self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm2(config.dims,9,config.worldsize),nn.GELU())   
         elif self.normtype==3:
@@ -121,6 +120,10 @@ class GPNNCell4(torch.nn.Module):
         elif self.normtype==4:
             self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm4(config.dims,1,config.worldsize),nn.GELU())
             self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),GlobalNorm4(config.dims,9,config.worldsize),nn.GELU())   
+        elif self.normtype==5:
+            # layer norm
+            self.norm=nn.Sequential(nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims),nn.GELU())
+            self.norm_obj=nn.Sequential(nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims),nn.GELU())   
         self.merging=nn.Sequential(nn.Dropout(config.dropout),nn.Linear(config.dims,config.dims),nn.LayerNorm(config.dims,eps=config.eps),nn.GELU())
 
         encoder_layer = nn.TransformerEncoderLayer(

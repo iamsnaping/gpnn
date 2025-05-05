@@ -2572,7 +2572,7 @@ class GPNNMix4(nn.Module):
     # stage_2 train_stage continue total middle
     # stage_3 train_stage backbone only -> middle
     # stage_4 inference -> middle total commonm private
-    # stage_5 train_stage backbone only -> middle no_scene_graph
+    # stage_5 train_stage backbone only -> middle continue
     # stage_6 single branch
     # stage_7 dual branch
     # stage_8 single branch continue
@@ -2584,22 +2584,26 @@ class GPNNMix4(nn.Module):
     # init_1 backbone 
     # init_2 backbone+private+common+total+middle
 
-    def __init__(self, config,flag=False,train_stage=1,pre=False):
+    def __init__(self, config,flag=False,train_stage=1,pre=False,lt=0):
         super().__init__()
         self.stage=train_stage
         self.flag=flag
         self.config=config
         self.pre=pre
+        # loss type
+        # 0: all loss;1: reconstruction.2.separation.3 no loss
+        self.lt=lt
         print('train_stage',self.stage)
         if self.stage in [3,5]:
             self.model_init1(config)
+            self.model_init3(config)
         elif self.stage in [2,1,4,6,7,8,10,11,12,13]:
             self.model_init1(config)
             self.model_init2(config)
         elif self.stage in [9]:
             self.model_init1(config)
             self.model_init2(config)
-            self.model_init3(config)
+            # self.model_init3(config)
         else:
             raise NotImplementedError
         self.freeze()
@@ -2654,7 +2658,8 @@ class GPNNMix4(nn.Module):
         if self.stage not in [9]:
             self.p_head=Head(config.dims,config.eps,config.dropout,config.cls.ag+1)
             self.c_head=Head(config.dims,config.eps,config.dropout,config.cls.ag+1)
-        self.recs=ReconstructNetwork(config)
+        if self.lt<2:
+            self.recs=ReconstructNetwork(config)
         self.total_pj=FFN(config.dims,config.eps,config.dims*4,config.dropout)
         self.gf=GateFusion(config)
         self.cls_head=Head(config.dims,config.eps,config.dropout,config.cls.ag)
@@ -2676,20 +2681,22 @@ class GPNNMix4(nn.Module):
         return d_weight
     
     def freeze(self):
-        if self.stage in [1,3,4,5,6,7,10,11,12,13]:
+        if self.stage in [1,3,4,6,7,10,11,12,13]:
             return
         for param in self.parameters():
             param.requires_grad = False
         # 2 total/middle
         # 3 middle backbone only
         train_modules={
-            2: [self.total_pj,self.cls_head,self.m_head],
-            8: [self.total_pj,self.cls_head,self.m_head],
-            9: [self.total_pj,self.cls_head,self.m_head],
+            2: ['total_pj','cls_head'],
+            8: ['total_pj','cls_head'],
+            9: ['total_pj','cls_head'],
+            5: ['m_head'],
             #2: [self.mffn, self.m_head, self.gf, self.cls_head, self.total_pj]
         }
-
-        for module in train_modules.get(self.stage,[]):
+        # modules=[m for m in getattr(self,module_name)]
+        modules=[getattr(self,module_name) for module_name in train_modules.get(self.stage,[])]
+        for module in modules:
             for param in module.parameters():
                 param.requires_grad=True
 
@@ -2916,8 +2923,7 @@ class GPNNMix4(nn.Module):
         t_node=self.gf(p_features,c_features)
         t_ans=self.cls_head(self.total_pj(t_node))
         return c_ans,p_ans,t_ans,m_ans
-
-    # backbone only no scene graph
+    # backbone only continue
     def forward5(self,frames,cls,rel,bbx_list,task_id,mask=None,tfm_mask=None):
         # nums =node+1
         B,Frame,Nums,dims=frames.shape
@@ -2927,32 +2933,21 @@ class GPNNMix4(nn.Module):
         bbx=self.bbx_linear(bbx_list)
         # breakpoint()
 
-        
+        cls_feature=self.cls_embed(cls)
 
         pos=self.pos.repeat(B,1,Nums,1)
         adapter_feature=self.adapter(frames)
-        # supervised
-        adapter_humam=adapter_feature[:,:,1:,:]
 
         # projection head
         frames_features=self.pj(self.tse(self.fusion(adapter_feature+bbx)+pos))
 
         # total features for a consist edge cls
-        human_obj_feature=frames_features[:,:,1:,:]
+        human_obj_feature=frames_features[:,:,1:,:]+cls_feature
         # supevised by adapter feature
-        cls_ans=self.obj_mlp(adapter_humam)
         human_obj_feature=human_obj_feature
-        human_feature=human_obj_feature[:,:,0,:].unsqueeze(-2)
-        human_features=human_feature.repeat(1,1,Nums-2,1)
-        obj_feature=human_obj_feature[:,:,1:,:]
-        global_feature=frames_features[:,:,0,:].unsqueeze(-2).repeat(1,1,Nums-2,1)
-        edge_feature=self.edge_fun(torch.cat([human_features,global_feature,obj_feature],dim=-1))
-        rel_ans=self.rel_mlp(edge_feature)
-
         human_obj_feature=self.mffn(human_obj_feature)
         m_ans=self.m_head(human_obj_feature)
-        
-        return m_ans,cls_ans,rel_ans
+        return m_ans
  
   # single branch
     def forward6(self,frames,cls,rel,bbx_list,task_id,mask=None,tfm_mask=None):
@@ -3092,9 +3087,10 @@ class GPNNMix4(nn.Module):
         # t_node=self.mergin_feature(torch.cat([p_features,c_features],dim=-1))
         # t_node=self.feature_mergin(torch.cat([p_features,c_features],dim=-1))
         t_ans=self.cls_head(self.total_pj(t_node))
-        recs=self.recs(t_node)
-        
-
+        if self.lt<2:
+            recs=self.recs(t_node)
+        else:
+            recs=[]
         return c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans
     # total middle
   # single branch
@@ -3231,10 +3227,10 @@ class GPNNMix4(nn.Module):
         # t_node_features=
         t_node=self.gf(p_features,c_features)
         t_ans=self.cls_head(self.total_pj(t_node))
-        m_ans=self.m_head(human_obj_feature)
+        # m_ans=self.m_head(human_obj_feature)
         
 
-        return t_ans,m_ans
+        return t_ans
     # total middle
   # single branch
     @torch.no_grad()

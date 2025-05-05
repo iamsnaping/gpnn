@@ -74,8 +74,8 @@ class GlobalNorm2(torch.nn.Module):
         self.momentum=momentum
         self.worldsize=worldsize
         self.mean_scale = torch.nn.Parameter(torch.Tensor(1,1,1,dims))
-        self.register_buffer('global_mean', torch.zeros(1,1,1,dims))
-        self.register_buffer('global_var', torch.ones(1,1,1,dims))
+        # self.register_buffer('global_mean', torch.zeros(1,1,1,dims))
+        # self.register_buffer('global_var', torch.ones(1,1,1,dims))
         self.reset_parameters()
         
     def reset_parameters(self):
@@ -103,8 +103,9 @@ class GlobalNorm2(torch.nn.Module):
         #     global_var=self.global_var
 
         out=x-global_mean*self.mean_scale
-        var=torch.sum(out.pow(2),dim=1)/(F-1)
+        var=torch.sum(out.pow(2),dim=1,keepdim=True)/(F-1)
         std=(var+self.eps).sqrt()
+        # breakpoint()
         return out * self.weight/std +self.bias
 
 
@@ -224,9 +225,9 @@ class GlobalNorm5(torch.nn.Module):
 
     def forward(self, x):
         B, F, N, D = x.shape  
-        global_mean=x.mean(dim=[0,2,3], keepdim=True)
+        global_mean=x.mean(dim=0, keepdim=True)
         # global_var=x.var(dim=0,unbiased=False,keepdim=True)
-        if self.training:
+        if self.training and self.mean_scale.requires_grad:
             with torch.no_grad():
                 if dist.is_initialized():
                     dist.all_reduce(global_mean, op=dist.ReduceOp.SUM)
@@ -238,7 +239,7 @@ class GlobalNorm5(torch.nn.Module):
 
         out=x-global_mean*self.mean_scale
         # unbias
-        var=torch.sum(out.pow(2),dim=1,keepdim=True)/(F-1)
+        var=out.pow(2)
         std=(var+self.eps).sqrt()
         return out * self.weight/std +self.bias
 

@@ -45,19 +45,19 @@ class SimplePrompt(nn.Module):
         self.flag=flag
         if flag:
             
-            self.tokens=nn.Embedding(config.cls.ag,config.dims*config.finetune.p_nums)
+            # self.tokens=nn.Embedding(config.cls.ag,config.dims*config.finetune.p_nums)
             self.ptokens=nn.Embedding(config.cls.ag,config.dims)
             # self.t_linear=nn.Linear(config.dims,config.dims)
             # self.p_linear=nn.Linear(config.dims,config.dims)
         else:
-            self.tokens=nn.Linear(config.cls.ag,config.dims*config.finetune.p_nums)
+            # self.tokens=nn.Linear(config.cls.ag,config.dims*config.finetune.p_nums)
             self.ptokens=nn.Linear(config.cls.ag,config.dims)
 
 
     def forward(self,X,task_id):
         b,f,n,d=X.shape
         # batch rels
-        task_id=task_id.unsqueeze(1).unsqueeze(1).repeat(1,f,n,1)
+        task_id=task_id.unsqueeze(1).unsqueeze(1).expand(-1,f,n,-1)
 
         X=self.ptokens(task_id)+X
         
