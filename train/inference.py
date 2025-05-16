@@ -7,9 +7,16 @@ from myutils.extra_model import (GPNNMix3_Test,
 from myutils.mydataset import (
                                MixAns2,
                                MixAns3,
-                               InfDataset)
+                               InfDataset,
+                               MixLocal)
 import json
-
+from myutils.data_utils import (sample_appearance_indices,
+                                VideoColorJitter,
+                                IdentityTransform,
+                                sample_train_layout_indices,
+                                get_test_layout_indices,
+                                fix_box)
+import h5py
 from myutils.config import *
 from tqdm import tqdm
 import argparse
@@ -60,6 +67,7 @@ def load_model_dict2(model,p1=None,p2=None):
     return model
 
 def load_model_dict(p,model,s=True):
+    # print(p)
     checkpoint=torch.load(p,'cpu')
     model_weight=checkpoint['model']
     model.load_state_dict(model_weight,strict=s)
@@ -90,8 +98,8 @@ def test_oracle(args,pretrain,p):
     min_index=0 if args.dt == 2 else 1
 
     model.eval()
-    acc_list=[[],[],[],[]]
-    names=['common','private','middle','total']
+    acc_list=[[],[],[]]
+    names=['common','private','total']
     xx=[i for i in range(min_index,17)]
     with torch.no_grad():
         for test_i in range(min_index,17):
@@ -160,12 +168,14 @@ def test_oracle(args,pretrain,p):
     # else:
     #     save_checkpoint(epoch+1,model,round(metrics['map']*100,5),optimizer,scheduler,time_stamp,'train')
  
-
-
 # 16 x 16 grid
-def test_oracle2(args,pretrain,p1,p2):
+def test_oracle2(args,pretrain,p1):
     config=load_config()
     config.prompt.type=args.prompt
+    config.max_epoch=args.epoch
+
+    config.normtype=3
+    
     write_path='/home/wu_tian_ci/GAFL/train/sh_file/write'+str(args.dt)+'1.txt'
     write_ans_path='/home/wu_tian_ci/GAFL/train/sh_file/write_ans'+str(args.dt)+'1.txt'
     # time_stamp=getTimeStamp()
@@ -187,8 +197,10 @@ def test_oracle2(args,pretrain,p1,p2):
     
     device=args.device
     model=GPNNMix4(config,flag=pretrain,train_stage=args.stage).to(device)
-    model=load_model_dict2(model,p1,p2)
+    # load_model_dict
+    model=load_model_dict(p1,model)
     min_index=1 if args.dt>1 else 2
+    min_index=1
 
     model.eval()
     # common private total
@@ -200,8 +212,10 @@ def test_oracle2(args,pretrain,p1,p2):
     f2=open(write_ans_path,'w')
     with torch.no_grad():
         for test_i in range(min_index,17):
-            test_ii=test_i+1 if args.dt>1 else test_i
+            # test_ii=test_i+1 if args.dt>1 else test_i
+            test_ii=test_i+1
             for test_j in range(1,test_ii):
+                # print('123',test_i,test_j)
                 # test_dataset=TestMixAns('test',args.dt,test_i,sample_each_clip=16,train=False)
                 # test_loader=DataLoader(test_dataset,batch_size=args.batchsize*4,num_workers=12)
                 test_dataset=MixAns3('test',sample_each_clip=16,train=False,mapping_type=args.dt,test_i=test_i,test_j=test_j)
@@ -211,12 +225,12 @@ def test_oracle2(args,pretrain,p1,p2):
                 evaluator = MyEvaluatorActionGenome(len(test_dataset),157)
                 evaluator2 = MyEvaluatorActionGenome(len(test_dataset),158,flag)
                 evaluator3 = MyEvaluatorActionGenome(len(test_dataset),158)
-                evaluator4 = MyEvaluatorActionGenome(len(test_dataset),157)
+                # evaluator4 = MyEvaluatorActionGenome(len(test_dataset),157)
 
                 evaluator.reset()
                 evaluator2.reset()
                 evaluator3.reset()
-                evaluator4.reset()
+                # evaluator4.reset()
 
                 for batch in test_loader:
                     frames,bbx,mask,label,cls_ids,cls_l,rel_l,private_label,common_label,token_tensor,mask_=batch
@@ -232,7 +246,7 @@ def test_oracle2(args,pretrain,p1,p2):
 
                     label=label.to(device).squeeze()
 
-                    c_ans,p_ans,t_ans,m_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
+                    c_ans,p_ans,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor,mask)
         
                     if len(label.shape)==1:
                         label.unsqueeze_(0)
@@ -245,24 +259,24 @@ def test_oracle2(args,pretrain,p1,p2):
        
                     evaluator2.process(c_ans,common_label)
                     evaluator3.process(p_ans,private_label)
-                    evaluator4.process(m_ans,label)
+                    # evaluator4.process(m_ans,label)
                 metrics = evaluator.evaluate()
                 metrics2 = evaluator2.evaluate()
                 metrics3 = evaluator3.evaluate()
-                metrics4 = evaluator4.evaluate()
+                # metrics4 = evaluator4.evaluate()
 
                 acc_list[0][test_i-1][test_j-1].append(metrics['map'])
                 acc_list[1][test_i-1][test_j-1].append(metrics2['map'])
                 acc_list[2][test_i-1][test_j-1].append(metrics3['map'])
-                acc_list[3][test_i-1][test_j-1].append(metrics4['map'])
+                # acc_list[3][test_i-1][test_j-1].append(metrics4['map'])
 
         for i in range(min_index-1,16):
             t_ans_list=[]
             c_ans_list=[]
             p_ans_list=[]
-            m_ans_list=[]
+            # m_ans_list=[]
             f.write('video:'+str(i)+'\n')
-            kk=i+1 if args.dt>1 else i
+            kk=i+1
             for j in range(kk):
                 t=np.mean(acc_list[0][i][j])
                 t_ans_list.append(t)
@@ -270,20 +284,22 @@ def test_oracle2(args,pretrain,p1,p2):
                 c_ans_list.append(c)
                 p=np.mean(acc_list[2][i][j])
                 p_ans_list.append(p)
-                m=np.mean(acc_list[3][i][j])
-                m_ans_list.append(m)
-            print_acc='video:'+str(i+1)+' '+'total:'+str(round(np.mean(t_ans_list)*100,3))+'%±'+str(round(np.std(t_ans_list)*100,3))+'%\t'\
-                        +'common:'+str(round(np.mean(c_ans_list)*100,3))+'%±'+str(round(np.std(c_ans_list)*100,3))+'%\t'\
-                        +'private:'+str(round(np.mean(p_ans_list)*100,3))+'%±'+str(round(np.std(p_ans_list)*100,3))+'%\t'\
-                        +'middle:'+str(round(np.mean(m_ans_list)*100,3))+'%±'+str(round(np.std(m_ans_list)*100,5))+'%\t\n'
+                # m=np.mean(acc_list[3][i][j])
+                # m_ans_list.append(m)
+            print_acc=str(i+1)+' '+str(round(np.mean(c_ans_list)*100,2))+'%±'+str(round(np.std(c_ans_list)*100,1))+'%\t\n'
+            # print_acc=str(i+1)+' '+str(round(np.mean(t_ans_list)*100,2))+'±'+str(round(np.std(t_ans_list)*100,1))+'\t'+\
+            #             +'common:'+str(round(np.mean(c_ans_list)*100,2))+'%±'+str(round(np.std(c_ans_list)*100,1))+'%\t'\
+                        # +'private:'+str(round(np.mean(p_ans_list)*100,2))+'%±'+str(round(np.std(p_ans_list)*100,1))+'%\t'+'\n'
+                        # +'middle:'+str(round(np.mean(m_ans_list)*100,3))+'%±'+str(round(np.std(m_ans_list)*100,5))+'%\t\n'
             f.write(print_acc)
             f2.write(print_acc)
             f.write(str(acc_list[0][i])+'\n')
             f.write(str(acc_list[1][i])+'\n')
             f.write(str(acc_list[2][i])+'\n')
-            f.write(str(acc_list[3][i])+'\n')
-            print(print_acc)
+            # f.write(str(acc_list[3][i])+'\n')
+            print(print_acc,end='')
     f.close()
+
     f2.close()
 
                 
@@ -669,9 +685,286 @@ def test_oracle3(args,pretrain,p1,p2):
     #     save_checkpoint(epoch+1,model,round(metrics['map']*100,5),optimizer,scheduler,time_stamp,'train')
  
 
+def test_iou(args,pretrain,p1):
+    config=load_config()
+    config.prompt.type=args.prompt
+    config.max_epoch=args.epoch
+
+    config.normtype=3
+    
+    time_stamp=getTimeStamp()
+    loss_record_path='/home/wu_tian_ci/GAFL/visualize'
+    t_path=time_stamp[0:8]
+    loss_record_path_=os.path.join(loss_record_path,t_path)
+    if not os.path.exists(loss_record_path_):
+        os.makedirs(loss_record_path_)
+    loss_record_path=os.path.join(loss_record_path_,time_stamp[8:12]+'ans.txt')
+
+    device=args.device
+    if args.model=='mix4':
+        model=GPNNMix4(config,flag=pretrain,train_stage=args.stage).to(device)
+    else:
+        raise NotImplementedError
+    model=load_model_dict(p1,model,True)
+    model.set_visual(True)
+    model.eval()
+    thh1=[0.2,0.5,0.7]
+    thh2=[0.2,0.5,0.7]
+    TP_list=[[[0 for i in range(157)] for i in range(3)] for j in range(3)]
+    FP_list=[[[0 for i in range(157)] for i in range(3)] for j in range(3)]
+    with torch.no_grad():
+
+        test_dataset=MixLocal('test',sample_each_clip=16,train=False,mapping_type=args.ds)
+        test_loader=DataLoader(test_dataset,batch_size=args.batchsize*4,num_workers=12)
+        for batch in tqdm(test_loader):
+            frames,bbx,mask,label,cls_ids,cls_l,rel_l,private_label,common_label,token_tensor,mask_,frame_ans,frame_flag=batch
+            frames=frames.to(device)
+            bbx=bbx.to(device)
+            cls_l=cls_l.to(device)
+            rel_l=rel_l.to(device)
+            cls_ids=cls_ids.to(device)
+            token_tensor=token_tensor.to(device)
+            private_label=private_label.to(device)
+            # common_label=common_label.to(device)
+            mask=mask.to(device)
+            mask_=mask_.to(device)
+            label=label.to(device).squeeze()
+            # breakpoint()
+
+            model.clear_visual()
+            c_ans,p_ans,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor,mask)
+            
+            g_v,p_v,c_v,t_v=model.get_visual()
+            
+            # breakpoint()
+
+            predictions=c_v[0][0].reshape(-1,16)
+            frame_ans=frame_ans.reshape(-1,16)
+            common_label=common_label.squeeze().numpy()
+            frame_flag=frame_flag.squeeze().numpy()
+            for i in range(3):
+                for j in range(3):
+                    iou_ans=(predictions>=thh1[i]).long()
+                    try:
+                        all_=iou_ans+frame_ans
+                    except:
+                        breakpoint()
+                    base=torch.clamp(all_,max=1)
+                    overlap=all_-base
+                    IOU_=(overlap.sum(dim=-1)/base.sum(dim=-1)>thh2[j]).long().numpy()
+                    for k in range(IOU_.shape[0]):
+                        if frame_flag[k]==1:
+                            if IOU_[k]==1:
+                                TP_list[i][j][common_label[k]]+=1
+                            else:
+                                FP_list[i][j][common_label[k]]+=1
+    AP_list=[[[]for i in range(3)]for j in range(3)]
+    for i in range(157):
+        for j in range(3):
+            for k in range(3):
+                if TP_list[j][k][i]+FP_list[j][k][i]==0:
+                    AP_list[j][k].append(0)
+                else:
+                    AP_list[j][k].append(TP_list[j][k][i]/(TP_list[j][k][i]+FP_list[j][k][i]))
+    sum_x=[0.,0.,0.]
+    sum_y=[0.,0.,0.]
+    for i in range(3):
+        tp_,len_=0.,0.
+        for j in range(3):
+           sum_x[j]+=sum(AP_list[i][j])
+           sum_y[j]+=len(AP_list[i][j])
+           print(str(round(sum(AP_list[i][j])/len(AP_list[i][j])*100,2)),end=' ')
+           tp_+=sum(AP_list[i][j])
+           len_+=len(AP_list[i][j])
+        print(str(round(tp_/len_*100,2)))
+    for i in range(3):
+        print(str(round(sum_x[i]/sum_y[i]*100,2)),end=' ')
+    print('')
+
+
+
+            # -16
+            # breakpoint()
+
+
+
+def singleIOU(args,pretrain,p1):
+    config=load_config()
+    config.prompt.type=args.prompt
+    config.max_epoch=args.epoch
+
+    config.normtype=3
+    
+    time_stamp=getTimeStamp()
+    loss_record_path='/home/wu_tian_ci/GAFL/visualize'
+    t_path=time_stamp[0:8]
+    loss_record_path_=os.path.join(loss_record_path,t_path)
+    if not os.path.exists(loss_record_path_):
+        os.makedirs(loss_record_path_)
+    loss_record_path=os.path.join(loss_record_path_,time_stamp[8:12]+'ans.txt')
+
+    device=args.device
+    if args.model=='mix4':
+        model=GPNNMix4(config,flag=pretrain,train_stage=args.stage).to(device)
+    else:
+        raise NotImplementedError
+    model=load_model_dict(p1,model,True)
+    model.set_visual(True)
+    model.eval()
+
+    frame_path='/home/wu_tian_ci/revisiting-spatial-temporal-layouts/data/action_genome/frames/D0Y4L.mp4'
+    frames_=os.listdir(frame_path)
+    indices = sample_appearance_indices(
+            16, len(frames_),False 
+        )
+    video_path=os.path.join('/home/wu_tian_ci/GAFL/data/hdf5/all_cls_rel','test.hdf5')
+    mask=json.load(
+        open(os.path.join("/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel",'test_mask.json'),'r')
+    )
+    bbx=json.load(
+        open(os.path.join("/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel",'test_bbx.json'),'r')
+    )
+    cls=json.load(
+        open(os.path.join("/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel",'test_obj_cls.json'),'r')
+    )
+    rel=json.load(
+        open(os.path.join("/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel",'test_rel.json'),'r')
+    )
+    ioufile=json.load(open('/home/wu_tian_ci/GAFL/data/ioufile/test.json','r'))
+    json_=json.load(
+            open(os.path.join("/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel",'test.json'),'r')
+        )
+    key_id='0OP1K.mp4'
+    video= h5py.File(
+            video_path, 
+            "r", libver="latest", swmr=True
+    )
+    # c006 0.00 5.90;c132 27.20 31.00;c097 24.30 28.80;c018 25.80 30.60
+    token_id=[96,106,107,141]
+    tokens=[6]
+    video2size=json.load(open('/home/wu_tian_ci/revisiting-spatial-temporal-layouts/data/video2size/ag.json','r'))
+        
+    frame_ids=json_[key_id]
+    frames=[torch.from_numpy(np.frombuffer(np.array(video[key_id][frame_ids[index]]),dtype=np.float16)).reshape(1,11,512) for index in indices]
+    f__=[frame_ids[i] for i in indices]
+    print(f__)
+    bbx=torch.tensor([bbx[key_id][index] for index in indices],dtype=torch.float32)
+    # mask=np.array([self.mask[key][index] for index in indices],dtype=np.int64)
+    mask=torch.tensor([mask[key_id][index] for index in indices],dtype=torch.long)
+    video_size=video2size[key_id.split('.')[0]]
+    # for gpnn
+    mask_=~mask.bool()
+    mask=mask[:,1:]
+    mask=torch.cat([mask,mask],dim=-1).unsqueeze(-1)
+
+
+    cls_ids=torch.tensor([cls[key_id][index] for index in indices],dtype=torch.long)
+    rel_ids=[rel[key_id][index] for index in indices]
+
+    frame_flag=torch.zeros(1,dtype=torch.long)
+
+    
+    
+    frame_ans=torch.zeros(16,dtype=torch.long)
+    frame_dict=ioufile[key_id]
+    frame_ids_local=[]
+    for l in token_id:
+        if frame_dict.get(str(l)) is not None:
+            frame_ids_local.extend(frame_dict[str(l)])
+    frame_ids_local=list(set(frame_ids_local))
+    if len(frame_ids_local)==0:
+        frame_flag[0]=0
+    else:
+        frame_flag[0]=1
+    frame_ans[frame_ids_local]=1
+
+
+    frames=torch.concat(frames,dim=0).float()
+    token_tensor=torch.zeros(157,dtype=torch.float32)
+    token_tensor[tokens]=1.0
+    # token_tensor=torch.tensor(tokens,dtype=torch.long)
+
+    bbx[:,:,0]/=video_size[0]
+    bbx[:,:,1]/=video_size[1]
+    bbx[:,:,2]/=video_size[0]
+    bbx[:,:,3]/=video_size[1]
+    zero_tensor=torch.tensor([[0.,0.,1.,1.]]).to(bbx)
+    zero_tensor=zero_tensor.unsqueeze(0).repeat(16,1,1)
+    bbx=torch.cat([zero_tensor,bbx],dim=-2)
+    # mask=torch.concat(mask_,dim=0).long()
+
+    # mask=torch.concat(mask,dim=0).long()
+    # mask_tensor_expanded = mask.bool().unsqueeze(-1).expand(-1, -1, 512)
+    # frames[~mask_tensor_expanded]=0.
+        # self.num_cls=157
+        # self.obj_cls_num=38
+        # self.rel_num=30
+        # node_num 10
+    rel=torch.zeros((16,10,30),dtype=torch.float32)
+    cls_cls=torch.zeros((16,10,38),dtype=torch.float32)
+    cls_cls.scatter_(2,cls_ids.unsqueeze(-1),1.)
+    for i in range(16):
+        for j in range(10):
+            rel[i][j][rel_ids[i][j]]=1.
+    # breakpoint()
+    # cls=torch.zeros(self.obj_cls_num,dtype=torch.float32)
+    # rel=torch.zeros(self.rel_num,dtype=torch.float32)
+    with torch.no_grad():
+        frames=frames.to(device).unsqueeze(0)
+       
+        bbx=bbx.to(device).unsqueeze(0)
+        # cls_l=cls_cls.to(device).unsqueeze(0)
+        rel_l=rel.to(device)[:,1:,:].unsqueeze(0)
+        cls_ids=cls_ids.to(device).unsqueeze(0)
+        token_tensor=token_tensor.to(device).unsqueeze(0)
+        # common_label=common_label.to(device)
+        mask=mask.to(device).unsqueeze(0)
+        mask_=mask_.to(device).unsqueeze(0)
+
+        for value in token_id:
+            # breakpoint()
+            print(value)
+            tokens=[value]
+            token_tensor=torch.zeros(157,dtype=torch.float32)
+            token_tensor[tokens]=1.
+            token_tensor=token_tensor.to(device).unsqueeze(0)
+            frame_ans=torch.zeros(16,dtype=torch.long)
+            frame_dict=ioufile[key_id]
+            frame_ids_local=[]
+            for l in tokens:
+                if frame_dict.get(str(l)) is not None:
+                    frame_ids_local.extend(frame_dict[str(l)])
+            frame_ids_local=list(set(frame_ids_local))
+            if len(frame_ids_local)==0:
+                frame_flag[0]=0
+            else:
+                frame_flag[0]=1
+            frame_ans[frame_ids_local]=1
+
+            # breakpoint()
+
+            model.clear_visual()
+            c_ans,p_ans,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor,mask)
+            
+            g_v,p_v,c_v,t_v=model.get_visual()
+            predictions=c_v[0][0].reshape(-1,16)
+            frame_ans=frame_ans.reshape(-1,16)
+            print('frame ans')
+            fas=frame_ans.squeeze().cpu().numpy()
+            for fa in fas:
+                print(fa,end=',')
+            print()
+            p_values=predictions.squeeze().cpu().numpy()
+            for p in p_values:
+                print(p,end=',')
+            print()
+
+ 
+
 
 if __name__=='__main__':
 
+        
     parser = argparse.ArgumentParser(description="Packs PIL images as HDF5.")
 
     parser.add_argument(
@@ -686,31 +979,64 @@ if __name__=='__main__':
         default="nothing",
         help="sth to say",
     )
-    
+    parser.add_argument(
+        "--epoch",
+        type=int,
+        default=20,
+        help="train epochs",
+    )
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=2,
+        help="warmup epochs",
+    )
     parser.add_argument(
         "--batchsize",
         type=int,
         default=32,
         help="batchsize",
     )
-
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=2e-4,
+        help="learning rate",
+    )
+    parser.add_argument(
+        "--decay",
+        type=float,
+        default=1e-3,
+        help="learning rate",
+    )
+    parser.add_argument(
+            "--clip_val",
+            type=float,
+            default=5.0,
+            help="The gradient clipping value.",
+        )
+    parser.add_argument(
+            "--wr",
+            type=float,
+            default=.1,
+            help="warm up rate for continue",
+        )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="mix4",
+        help="model",
+    )
     parser.add_argument(
         "--ds",
         type=int,
-        default=2,
-        help="dataset",
-    )
-
-    parser.add_argument(
-        "--prompt",
-        type=int,
         default=1,
-        help="prompt type 0:smiple 1:gpfp",
+        help="dataset",
     )
     parser.add_argument(
         "--stage",
         type=int,
-        default=3,
+        default=4,
         help="train stage",
     )
     parser.add_argument(
@@ -720,39 +1046,42 @@ if __name__=='__main__':
         help="train type 0:oracle 1:oracle continue 2:pure",
     )
     parser.add_argument(
-        "--dt",
+        "--prompt",
         type=int,
         default=1,
-        help="dt type 1:no padding 1  2:padding",
+        help="prompt type 0:smiple 1:gpfp",
+    )
+    parser.add_argument(
+        "--loss",
+        type=int,
+        default=1,
+        help="speration and reconstruction loss,0 no loss,1 loss",
     )
     parser.add_argument(
         "--p_index",
         type=int,
         default=0,
-        help="load path",
+        help="continue path",
     )
     parser.add_argument(
-        "--local-rank",
+        "--dt",
         type=int,
         default=0,
-        help="local rank",
+        help="dataset type",
     )
     set_seed(seed=3407)
     args = parser.parse_args()
     # train(args,True
     # p='/home/wu_tian_ci/GAFL/recoder/checkpoint/train/20250324/2211/1_t:68.13982m:64.26654.pth'
-    p1=['/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250416/1449/20_t:59.87919_c:90.81566_p:49.80294.pth',
-           '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250415/2037/20_t:59.42587_c:91.1116_p:47.09343.pth',
-           '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250416/2052/20_t:59.44598_c:91.46358_p:53.10185.pth',
-           '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250420/1044/18_t:60.8355_c:90.10944_p:50.15488.pth']
-    p2=['/home/wu_tian_ci/GAFL/recoder/checkpoint/train/20250417/1929/5_t:71.05293_m:59.90562.pth',
-        '/home/wu_tian_ci/GAFL/recoder/checkpoint/train/20250417/2051/5_t:73.07588_m:59.84188.pth',
-        '',
-        '']
+    p1=['/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250502/1214/5_t:71.32574_c:92.00494_p:43.23898.pth']
     if args.tp ==0:
         test_oracle(args,False,p1)
     elif args.tp==1:
-        test_oracle2(args,False,p1,p2)
+        test_oracle2(args,False,p1[args.p_index])
+    elif args.tp==4:
+        test_iou(args,False,p1[args.p_index])
+    elif args.tp==5:
+        singleIOU(args,False,p1[args.p_index])
     elif args.tp==2:
         test_oracle3(args,False,p1[args.p_index],p2[args.p_index])
     elif args.tp==3:

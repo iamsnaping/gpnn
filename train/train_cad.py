@@ -2,7 +2,7 @@ import sys
 sys.path.append('/home/wu_tian_ci/GAFL')
 import torch.optim as optim
 import torch
-from myutils.extra_model import (GPNNMix4,GPNNMix5)
+from myutils.extra_model import (GPNNMix4,GPNNMix5,GPNNMix5_1)
 from myutils.mydataset import (
                                MixAns2,
                                MixCAD)
@@ -105,12 +105,13 @@ def load_model_dict(p,model,s=False):
     model.load_state_dict(model_weight,strict=s)
     return model
 
-def train_oracle(args,pretrain):
+def train_oracle_cad(args,pretrain):
     config=load_config()
     config.max_epoch=args.epoch
     config.prompt.type=args.prompt
     config.normtype=args.normtype
     config.gpfp.detach=args.detach
+    # config.loss.rec.weight=1
     '''
     finetune:
   p_nums: 10
@@ -119,20 +120,15 @@ def train_oracle(args,pretrain):
     if dist.is_initialized:
         worldsize=dist.get_world_size()
         config.worldsize=worldsize if worldsize!=-1 else config.worldsize
-    if args.smw==0:
-        config.loss.spe.mw=0
-    if args.rmw==0:
-        config.loss.rec.mw=0
-    config.loss.rec.margin=args.rm
-    config.loss.spe.margin=args.sm
 
-    test_dataset=MixAns2('test',sample_each_clip=16,train=False,mapping_type=args.ds)
+
+    test_dataset=MixCAD('test',sample_each_clip=16,train=False,mapping_type=args.ds)
     testts=torch.utils.data.distributed.DistributedSampler(test_dataset,shuffle=False)
-    test_loader=DataLoader(test_dataset,batch_size=args.batchsize*4,num_workers=12,
+    test_loader=DataLoader(test_dataset,batch_size=args.batchsize*4,num_workers=1,
                            sampler=testts)
-    dataset=MixAns2('train',sample_each_clip=16,train=True,mapping_type=args.ds)
+    dataset=MixCAD('train',sample_each_clip=16,train=True,mapping_type=args.ds)
     traints=torch.utils.data.distributed.DistributedSampler(dataset)
-    train_loader=DataLoader(dataset,batch_size=args.batchsize,num_workers=12,
+    train_loader=DataLoader(dataset,batch_size=args.batchsize,num_workers=1,
                             sampler=traints)
     if args.loss==0:
         config.loss.spe.weight=0.
@@ -145,19 +141,18 @@ def train_oracle(args,pretrain):
     set_seed(seed=args.seed,local_rank=local_rank)
     device = torch.device(local_rank)
     num_batches = len(dataset) // (args.batchsize*worldsize)
-    model=GPNNMix4(config,flag=pretrain,train_stage=args.stage,lt=args.loss).to(device)
+    model=GPNNMix5_1(config,flag=pretrain,train_stage=args.stage,lt=args.loss).to(device)
 
     model.apply(weight_init_dis)
     if args.normtype==1:
         model=SyncBatchNorm.convert_sync_batchnorm(model)
-    model=torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],output_device=local_rank,find_unused_parameters=False)
+    model=torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],output_device=local_rank,find_unused_parameters=True)
 
     
-    cri=Criterion(config)
-    adapter=AdapterLoss(config)
+    cadloss=CADLoss()
+
     sloss=SeperationLoss(config)
     rloss=ReconstructLoss(config)
-
 
     parameters = add_weight_decay(model.module, args.decay)
     optimizer = optim.AdamW(parameters, lr=args.lr)
@@ -165,13 +160,10 @@ def train_oracle(args,pretrain):
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps=args.wr * num_batches,
-        num_training_steps=args.epoch * num_batches,
+        num_training_steps=args.epoch * num_batches+10,
     )
     # total common private middle
-    evaluator = MyEvaluatorActionGenome(len(test_dataset),157)
-    evaluator2 = MyEvaluatorActionGenome(len(test_dataset),158)
-    evaluator3 = MyEvaluatorActionGenome(len(test_dataset),158)
-    evaluator4 = MyEvaluatorActionGenome(len(test_dataset),157)
+
 
     if local_rank==0:
         time_stamp=getTimeStamp()
@@ -200,61 +192,38 @@ def train_oracle(args,pretrain):
         with tqdm(total=len(train_loader)) as pbar:
             for batch in train_loader:
                 counters+=1
-                frames,bbx,mask,label,cls_ids,cls_l,rel_l,private_label,common_label,token_tensor,mask_=batch
+                features,union_fs,bbxes,cls_,label,token,c,p=batch
                 # breakpoint()
-                frames=frames.to(device)
-                bbx=bbx.to(device)
-                mask=mask.to(device)
-                cls_l=cls_l.to(device)
-                rel_l=rel_l.to(device)
+                features=features.to(device)
+                union_fs=union_fs.to(device)
+                bbxes=bbxes.to(device)
+                cls_=cls_.to(device)
+                c=c.to(device).squeeze()
+                p=p.to(device).squeeze()
+                token=token.to(device)
+                # rel_l=rel_l.to(device)
                 label=label.to(device).squeeze()
-                cls_ids=cls_ids.to(device)
+                # cls_ids=cls_ids.to(device)
 
-                token_tensor=token_tensor.to(device)
-                private_label=private_label.to(device)
-                common_label=common_label.to(device)
-                mask_=mask_.to(device)
 
                 
-                if args.mt==0:
-                    c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                elif args.mt==1:
-                    c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor,mask)
-                elif args.mt==2:
-                    c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor,mask,mask_)
+
+                c_ans,p_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(features,cls_,union_fs,bbxes,token)
 
                 # loss=loss1+loss2+loss3+loss4+loss5+loss6
 
-                breakpoint()
+                # breakpoint()
                 # loss4,loss4_1=rloss(human_obj_feature,recs,epoch+1)
-                loss2,loss2_1,=cri(t_ans,label) 
-                loss1,loss1_1=cri(c_ans,common_label)
-                loss6,loss6_1=cri(p_ans,private_label)
-                if args.loss==0:
-                    loss4,loss4_1=rloss(human_obj_feature,recs,epoch+1)
-                    loss3,loss3_1=sloss(c_features,p_features,epoch+1)
-                elif args.loss==1:
-                    loss4,loss4_1=rloss(human_obj_feature,recs,epoch+1)
-                    loss3=0.
-                    loss3_1='0.0'
-                elif args.loss==2:
-                    loss3,loss3_1=sloss(c_features,p_features,epoch+1)
-                    loss4=0.
-                    loss4_1='0.0'
-                elif args.loss==3:
-                    loss3,loss4=0.,0.
-                    loss3_1,loss4_1='0.0','0.0'
-
-
-            
-                d_weight=model.module.get_weight(loss6,loss1)
-                loss5,loss5_1,loss5_2=adapter(rel_ans,cls_ans,rel_l,cls_l,epoch+1)
+                loss2,loss2_1,=cadloss(t_ans,label) 
+                loss4,loss4_1=rloss(human_obj_feature,recs,epoch+1)
                 loss3,loss3_1=sloss(c_features,p_features,epoch+1)
-                loss=loss1+loss5+loss6*config.loss.pri*d_weight+loss3+loss4\
+                # breakpoint()
+                loss1,loss1_1=cadloss(c_ans,c)
+                loss6,loss6_1=cadloss(p_ans,p)
+                d_weight=model.module.get_weight(loss6,loss1)
+                loss3,loss3_1=sloss(c_features,p_features,epoch+1)
+                loss=loss1+loss6*config.loss.pri*d_weight+loss3+loss4\
                         +loss2*config.loss.tot
-
-                # loss=loss5+loss3+loss4\
-                #         +loss2*config.loss.tot
 
 
                 optimizer.zero_grad()
@@ -269,8 +238,8 @@ def train_oracle(args,pretrain):
                 # loss_str=str(loss1_1)+"_"+str(loss6_1)+"_"+str(loss5_1)+"_"+str(loss5_2)+"_"+str(loss3_1)+"_"+str(loss4_1)\
                 #         +'_t:'+str(loss2_1)
 
-                loss_str=str(loss5_1)+"_"+str(loss5_2)+"_"+str(loss3_1)+"_"+str(loss4_1)\
-                        +'_t:'+str(loss2_1)+'_c:'+str(loss1_1)+'_p:'+str(loss6_1)
+                loss_str=str(loss1_1)+"_"+str(loss6_1)+"_"+str(loss3_1)+"_"+str(loss4_1)\
+                        +'_t:'+str(loss2_1)
                 pbar.set_postfix({"Loss": loss_str})
                 if local_rank==0:
                     
@@ -279,70 +248,55 @@ def train_oracle(args,pretrain):
                     f.close()
                     txt_k+=1
         model.eval()
-        # common private total
+
+        t_pre,t_lab=[],[]
         c_pre,c_lab=[],[]
         p_pre,p_lab=[],[]
-        t_pre,t_lab=[],[]
         with torch.no_grad():
             testts.set_epoch(epoch)
             for batch in tqdm(test_loader):
-                frames,bbx,mask,label,cls_ids,cls_l,rel_l,private_label,common_label,token_tensor,mask_=batch
-                frames=frames.to(device)
-                bbx=bbx.to(device)
-                mask=mask.to(device)
-                cls_l=cls_l.to(device)
-                rel_l=rel_l.to(device)
-                cls_ids=cls_ids.to(device)
-                token_tensor=token_tensor.to(device)
-                private_label=private_label.to(device)
-                common_label=common_label.to(device)
-
+                features,union_fs,bbxes,cls_,label,token,c,p=batch
+                features=features.to(device)
+                union_fs=union_fs.to(device)
+                bbxes=bbxes.to(device)
+                cls_=cls_.to(device)
                 label=label.to(device).squeeze()
+                c=c.to(device).squeeze()
+                p=p.to(device).squeeze()
+                token=token.to(device)
+                # cls_ids=cls_ids.to(device)
 
-                if args.mt==0:
-                    c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
-                elif args.mt==1:
-                    c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor,mask)
-                elif args.mt==2:
-                    c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor,mask,mask_)
-                if len(label.shape)==1:
-                    label.unsqueeze_(0)
-                    common_label.unsqueeze_(0)
-                    private_label.unsqueeze_(0)
-                # c_pre.append(c_ans)
-                # p_pre.append(p_ans)
-                # c_lab.append(common_label)
-                # p_lab.append(private_label)
-                t_pre.append(t_ans)
+                
+
+                c_ans,p_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(features,cls_,union_fs,bbxes,token)
+
+                
+                t_pre.append(t_ans.argmax(dim=-1))
                 t_lab.append(label)
+                c_pre.append(c_ans.argmax(dim=-1))
+                c_lab.append(c)
+                p_pre.append(p_ans.argmax(dim=-1))
+                p_lab.append(p)
 
 
-        # p_pred = distributed_concat(torch.concat(p_pre, dim=0),len(testts.dataset))
-        # p_labe = distributed_concat(torch.concat(p_lab, dim=0),len(testts.dataset))
-        # c_pred = distributed_concat(torch.concat(c_pre, dim=0),len(testts.dataset))
-        # c_labe = distributed_concat(torch.concat(c_lab, dim=0),len(testts.dataset))
         t_pred = distributed_concat(torch.concat(t_pre, dim=0),len(testts.dataset))
         t_labe = distributed_concat(torch.concat(t_lab, dim=0),len(testts.dataset))
+        c_pred = distributed_concat(torch.concat(c_pre, dim=0),len(testts.dataset))
+        c_labe = distributed_concat(torch.concat(c_lab, dim=0),len(testts.dataset))
+        p_pred = distributed_concat(torch.concat(p_pre, dim=0),len(testts.dataset))
+        p_labe = distributed_concat(torch.concat(p_lab, dim=0),len(testts.dataset))
         if local_rank==0:
-            evaluator.reset()
-            evaluator2.reset()
-            evaluator3.reset()
-            evaluator4.reset()
-            # evaluator2.process(c_pred,c_labe)
-            # metrics2 = evaluator2.evaluate()
-            # evaluator3.process(p_pred,p_labe)
-            # metrics3 = evaluator3.evaluate()
-            evaluator.process(t_pred,t_labe)
-            metrics = evaluator.evaluate()
-
+    
+            mar=recall_score(t_labe.cpu().numpy(),t_pred.cpu().numpy(),average='macro')
+            cmar=recall_score(c_labe.cpu().numpy(),c_pred.cpu().numpy(),average='macro')
+            pmar=recall_score(p_labe.cpu().numpy(),p_pred.cpu().numpy(),average='macro')
 
             if args.stage in [1,6,7]:
                 # acc_str='t:'+str(round(metrics['map']*100,5))+'_c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))   
-                acc_str='t:'+str(round(metrics['map']*100,5))
+                acc_str='t:'+str(round(mar,5))+' c:'+str(round(cmar,5))+'p:'+str(round(pmar,5))
                 # acc_str='c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))             
             save_checkpoint(epoch+1,model.module,acc_str,optimizer,scheduler,time_stamp,'pretrain')
             print('saved')
-
 
 def train_oracle_continue(args,pretrain,p):
     config=load_config()
@@ -937,7 +891,7 @@ if __name__=='__main__':
     parser.add_argument(
         "--loss",
         type=int,
-        default=0,
+        default=1,
         help="speration and reconstruction loss,0 no loss,1 loss",
     )
     parser.add_argument(
@@ -1030,7 +984,7 @@ if __name__=='__main__':
         '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250505/0223/5_t:66.92699_c:89.84827_p:43.20065.pth',
         '/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250505/0416/5_t:65.83459_c:91.71935_p:48.06946.pth']
     if args.tp ==0:
-        train_oracle(args,False)
+        train_oracle_cad(args,False)
     elif args.tp==1:
         print('continue')
         # p='/home/wu_tian_ci/GAFL/recoder/checkpoint/pretrain/20250327/1238/20_t:61.87185_c:88.61021_p:58.9198_o1:59.48385.pth'

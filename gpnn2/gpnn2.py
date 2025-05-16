@@ -140,7 +140,13 @@ class GPNNCell4(torch.nn.Module):
         self.edges=[]
         self.visual=False
 
+    def clear_visual(self):
+        self.edges=[]
 
+    def normalize_score(self,score):
+        score=score/(score.max(dim=-2,keepdim=True)[0])
+        return score
+    
     def forward(self, human_feature,obj_features,edge_features,mask=None,tfm_mask=None):
         B,F,N,D=obj_features.shape
         human_features=human_feature.repeat(1, 1, N, 1)
@@ -155,12 +161,16 @@ class GPNNCell4(torch.nn.Module):
             tmp_edge=self.tfm(einops.rearrange(tmp_edge,'b f n d -> (b n) f d'))
         tmp_edge=einops.rearrange(tmp_edge,'(b n) f d -> b f n d',b=B,n=N*2)
 
-        if mask is not None:
-            weight_edge=self.link_fun(tmp_edge)*mask
-        else:
-            weight_edge=self.link_fun(tmp_edge)
+
+        weight_edge=self.link_fun(tmp_edge)
         if self.visual:
-            self.edges.append(weight_edge.cpu().detach())
+            if mask is not None:
+                
+                weight_edge_=self.normalize_score((weight_edge*mask)[:,:,:9,:])
+                # breakpoint()
+            else:
+                raise ModuleNotFoundError
+            self.edges.append(weight_edge_.cpu().detach())
         node_features=torch.cat([human_features,obj_features],dim=-2)
 
 
@@ -356,6 +366,8 @@ class GPNN4(nn.Module):
         for layer in self.gpnn:
             self.edges.append(layer.edges)
         return self.edges
+    def clear_visual(self):
+        self.edges=[]
 
 
     def set_visual(self,flag=True):

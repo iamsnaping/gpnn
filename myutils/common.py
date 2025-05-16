@@ -67,25 +67,7 @@ class DynamicFlatter(nn.Module):
         # score net
         self.gamma=2
         self.eps=eps
-        # frame-level
 
-        # self.pj1=nn.Sequential(nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim,in_dim))
-        # # video-level
-
-        # self.pj2=nn.Sequential(nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim,in_dim))
-        # self.pj2_2=nn.Sequential(nn.Dropout(dropout),nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU())
-
-        # # frame-level
-        # self.score1=nn.Sequential(nn.LayerNorm(in_dim),nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),
-        #                           nn.GELU(),nn.Linear(in_dim//4,1),nn.Sigmoid())
-        # video-level
-        # self.score2=nn.Sequential(nn.LayerNorm(in_dim),nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),
-        #                           nn.GELU(),nn.Linear(in_dim//4,1),nn.Sigmoid())
-
-        # self.pj1=nn.Sequential(nn.LayerNorm(in_dim),nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim,in_dim))
-        # video-level
-
-        # self.pj2=nn.Sequential(nn.LayerNorm(in_dim),nn.Linear(in_dim,in_dim),nn.LayerNorm(in_dim),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim,in_dim))
         self.pj1=FFN(in_dim,eps,in_dim*4,dropout)
         self.pj2=FFN(in_dim,eps,in_dim*4,dropout)
         self.score1=nn.Sequential(nn.Linear(in_dim,in_dim//2),nn.GELU(),nn.Dropout(dropout),nn.Linear(in_dim//2,in_dim//4),
@@ -119,6 +101,12 @@ class DynamicFlatter(nn.Module):
         score=score.pow(self.gamma)
         score=score/(score.max(dim=-2,keepdim=True)[0]+self.eps)
         return score
+
+    def clear_visual(self):
+        self.vl_weight=[]
+        self.fl_weight=[]
+
+
     
     # batch frame nodes dims
     def forward(self,X):
@@ -140,8 +128,10 @@ class DynamicFlatter(nn.Module):
         f1=torch.sum(f1,dim=-2)
         f2=self.f2(f1)
         if self.visual:
-            self.vl_weight.append(video_scores.cpu().detach())
-            self.fl_weight.append(frame_scores.cpu().detach())
+            self.vl_weight.append(self.normalize_score(video_scores).cpu().detach())
+            self.fl_weight.append(self.normalize_score(frame_scores).cpu().detach())
+            # self.vl_weight.append(video_scores.cpu().detach())
+            # self.fl_weight.append(frame_scores.cpu().detach())
         return f2
 
 class DynamicFlatterWithGate(nn.Module):

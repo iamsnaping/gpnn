@@ -7,12 +7,12 @@ loss:
     rel: 1.
   cls: 1.
   spe: 
-    margin: .2
+    margin: .0
     weight: 1.0
     max_mar: .7
     mw: 1.
   rec: 
-    margin: .2
+    margin: .1
     weight: 1.0
     max_mar: .7
     mw: 1.
@@ -111,3 +111,7 @@ gpfp:
   detach: False
 
 max_epoch: 20
+cad:
+  nodes: 11
+  rel: 4
+  cls: 10

@@ -1780,6 +1780,65 @@ def get_sperate_labels3(name,labels,full_list,flag=False):
             })
     return label_list
 
+def get_IOU1(name,labels,full_list):
+    labels=list(set(labels))
+    token_list=[int(i) for i in labels]
+
+
+
+    token_set=set(token_list)
+
+    
+    list_len=len(token_list)
+
+    # random_l=random.sample(contra_list,1)
+    label_list=[]
+    for i in range(1,list_len+1):
+        t_list=[token_list[i-1]]
+        t_set=set(t_list)
+        p_list=list(token_set-t_set)
+ 
+        label_list.append({
+            'id':name,
+            'token':t_list,
+            'private':p_list,
+            'common':t_list
+        })
+    return label_list
+
+def get_IOU2(name,labels,full_list):
+    labels=list(set(labels))
+    token_list=[int(i) for i in labels]
+
+    contra_set=set(full_list)-set(token_list)
+
+    token_set=set(token_list)
+    contra_list=list(contra_set)
+    
+    list_len=len(token_list)
+    max_labels=16
+
+    label_list=[]
+    for i in range(1,list_len+1):
+        t_list=random.sample(token_list,i)
+        t_list=[token_list[i-1]]
+        
+        t_list_con=random.sample(contra_list,max_labels-i)
+        t_list_token=t_list+t_list_con
+        t_set=set(t_list)
+        p_list=list(token_set-t_set)
+        if len(p_list)==0:
+            p_list=[157]
+        label_list.append({
+            'id':name,
+            'token':t_list_token,
+            'private':p_list,
+            'common':t_list
+        })
+    return label_list
+
+
+
 # padding to 16 tokens
 def get_sperate_labels4(name,labels,full_list):
     labels=list(set(labels))
@@ -1936,9 +1995,12 @@ def mapping_table_test(name,label_type=1):
                         '/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_6/1',
                         '/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_6/2',
                         '/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_6/3']
+    elif label_type==8:
+        # 1 all right 2 all wrong 3 padding 16
+        json_base_path='/home/wu_tian_ci/GAFL/json_dataset/mapping_test/type_7'
     else:
         raise NotImplementedError
-    if label_type in [1,2,3,5]:
+    if label_type in [1,2,3,5,8]:
         for i in range(1,17):
             for j in range(1,i+1):
                 c_dir=os.path.join(json_base_path,str(i),str(j))
@@ -1991,6 +2053,10 @@ def mapping_table_test(name,label_type=1):
             l1=get_sperate_labels3(k,json_file[label_name],full_list,True)
             l2=get_sperate_labels3(k,json_file[label_name],full_list,False)
             l3=get_sperate_labels4(k,json_file[label_name],full_list)
+        elif label_type in [8]:
+            l1=get_sperate_labels3(k,json_file[label_name],full_list,True)
+            l3=get_sperate_labels4(k,json_file[label_name],full_list)
+
         else:
             raise NotImplementedError
         # breakpoint()
@@ -2013,9 +2079,13 @@ def mapping_table_test(name,label_type=1):
                 ans_1.append(l1[i])
                 ans_2.append(l2[i])
                 ans_3.append(l3[i])
+            elif label_type in [8]:
+                ans_list[tokens_len-1][i].append(l1[i])
+                ans_list[tokens_len-1][i].append(l3[i])
+
 
     # print(name,':',len(ans_list),' ',len(keys),' ',np.mean(len_a),' ',np.sum(len_a),' ',len(len_a))
-    if label_type in [1,2,3,5]:
+    if label_type in [1,2,3,5,8]:
         for i in range(16):
             for j in range(i+1):
                 # breakpoint()
@@ -2033,6 +2103,42 @@ def mapping_table_test(name,label_type=1):
         json.dump(ans_1,open(jsps[0],'w'))
         json.dump(ans_2,open(jsps[1],'w'))
         json.dump(ans_3,open(jsps[2],'w'))
+
+
+def mapping_table_iou(name,label_type=1):
+    full_list=[i for i in range(157)]
+    json_file=json.load(
+            open(os.path.join("/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel",name+'.json'),'r')
+        )
+    keys=list(json_file.keys())
+    save_path='/home/wu_tian_ci/GAFL/json_dataset/mapping_IOU'
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    json_1=os.path.join(save_path,'all.json')
+    json_2=os.path.join(save_path,'right.json')
+    json_3=os.path.join(save_path,'padding.json')
+    
+    json_keys=[item for item in keys if 'label' not in item]
+    len_a=[]
+    ans_list1,ans_list2,ans_list3=[],[],[]
+    for k in tqdm(json_keys):
+        label_name=k+'_label'
+        json_set=set(json_file[label_name])
+        len_a.append(len(list(json_set)))
+        tokens_len=len(json_set)
+        if len(json_set)>16:
+            continue
+        l1=get_IOU1(k,json_file[label_name],full_list)
+        l2=get_IOU2(k,json_file[label_name],full_list)
+        ans_list1.extend(l2)
+        ans_list2.extend(l1)
+        ans_list3.extend(l1)
+        ans_list3.extend(l2)
+    json.dump(ans_list1,open(json_3,'w'))
+    json.dump(ans_list2,open(json_2,'w'))
+    json.dump(ans_list3,open(json_1,'w'))
+
+
 
 def tally_label(name):
     full_list=[i for i in range(157)]
@@ -2414,7 +2520,9 @@ if __name__=="__main__":
     # mapping_table_test('test',1)
     # mapping_table_test('test',2)
     set_seed()
-    mapping_table_test('test',7)
+    # mapping_table_test('test',7)
+    # mapping_table_test('test',5)
+    mapping_table_iou('test')
     # trans_all_json()
 
     # for i in range(1,6):

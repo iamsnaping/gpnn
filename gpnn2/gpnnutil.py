@@ -64,6 +64,53 @@ class GlobalNorm(torch.nn.Module):
         return f'{self.__class__.__name__}({self.dims})'
 
 # graph norm
+'''
+copy from
+https://pytorch-geometric.readthedocs.io/en/latest/_modules/torch_geometric/nn/norm/graph_norm.html#GraphNorm
+    def __init__(self, in_channels: int, eps: float = 1e-5):
+        super().__init__()
+
+        self.in_channels = in_channels
+        self.eps = eps
+
+        self.weight = torch.nn.Parameter(torch.empty(in_channels))
+        self.bias = torch.nn.Parameter(torch.empty(in_channels))
+        self.mean_scale = torch.nn.Parameter(torch.empty(in_channels))
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        r"""Resets all learnable parameters of the module."""
+        ones(self.weight)
+        zeros(self.bias)
+        ones(self.mean_scale)
+
+
+    def forward(self, x: Tensor, batch: OptTensor = None,
+                batch_size: Optional[int] = None) -> Tensor:
+        r"""Forward pass.
+
+        Args:
+            x (torch.Tensor): The source tensor.
+            batch (torch.Tensor, optional): The batch vector
+                :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which assigns
+                each element to a specific example. (default: :obj:`None`)
+            batch_size (int, optional): The number of examples :math:`B`.
+                Automatically calculated if not given. (default: :obj:`None`)
+        """
+        if batch is None:
+            batch = x.new_zeros(x.size(0), dtype=torch.long)
+            batch_size = 1
+
+        if batch_size is None:
+            batch_size = int(batch.max()) + 1
+
+        mean = scatter(x, batch, 0, batch_size, reduce='mean')
+        out = x - mean.index_select(0, batch) * self.mean_scale
+        var = scatter(out.pow(2), batch, 0, batch_size, reduce='mean')
+        std = (var + self.eps).sqrt().index_select(0, batch)
+        return self.weight * out / std + self.bias
+'''
 class GlobalNorm2(torch.nn.Module):
     def __init__(self, dims: int, dim2:int,worldsize:int,momentum: int =0.1, eps: float = 1e-5):
         super().__init__()
@@ -87,21 +134,6 @@ class GlobalNorm2(torch.nn.Module):
     def forward(self, x):
         B, F, N, D = x.shape  
         global_mean=x.mean(dim=1, keepdim=True)
-        # global_var=x.var(dim=[1,2],unbiased=False,keepdim=True)
-        # if self.training:
-        #     with torch.no_grad():
-        #         if dist.is_initialized():
-        #             dist.all_reduce(global_mean, op=dist.ReduceOp.SUM)
-        #             dist.all_reduce(global_var, op=dist.ReduceOp.SUM)
-        #             global_mean = global_mean / self.worldsize  
-        #             global_var = global_var / self.worldsize
-
-        #         self.global_mean.mul_(1-self.momentum).add_(self.momentum*global_mean)
-        #         self.global_var.mul_(1-self.momentum).add_(self.momentum*global_var)
-        # else:
-        #     global_mean=self.global_mean
-        #     global_var=self.global_var
-
         out=x-global_mean*self.mean_scale
         var=torch.sum(out.pow(2),dim=1,keepdim=True)/(F-1)
         std=(var+self.eps).sqrt()

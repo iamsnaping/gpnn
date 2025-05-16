@@ -183,6 +183,20 @@ class AdapterLoss(nn.Module):
 #         cls_weight=self.cls+(self.cls_max-self.cls)*((epochs+self.epoch_max)/self.epoch_max)
 #         return cls_loss*cls_weight,round(cls_loss.item(),2)
 
+class CADLoss(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.cls_loss=nn.CrossEntropyLoss()
+
+    
+
+    # batch frames nums dims
+    # mask b f n
+    # 
+    def forward(self,x,label):
+        cls_loss=self.cls_loss(x,label)
+        return cls_loss,round(cls_loss.item(),2)
 
 if __name__=='__main__':
     x=torch.randn(2,2,2,2)

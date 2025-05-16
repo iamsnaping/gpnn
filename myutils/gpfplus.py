@@ -111,6 +111,54 @@ class GPFPlus(nn.Module):
         return X_in+prompt
 
 
+class SinglePrompt(nn.Module):
+# flag =true -> nn.embeding else linear
+    def __init__(self, config,flag=False):
+        super().__init__()
+        self.pnums=config.finetune.p_nums
+        self.dims=config.dims
+        self.detach=config.gpfp.detach
+        print('gfpf detach',self.detach)
+        self.flag=flag
+
+        self.tokens=nn.Linear(10,config.dims*config.finetune.p_nums)
+        self.ptokens=nn.Linear(10,config.dims)
+        # global:1 human:1 obj:9
+        # self.net=nn.Sequential(nn.Linear(config.dims,config.dims//4),nn.GELU(),nn.Linear(config.dims//4,config.finetune.p_nums),nn.Sigmoid())
+        # self.net=nn.Sequential(FFN(config.dims,config.eps,config.dims*4,config.dropout),
+        #                        nn.Linear(config.dims,config.dims//4),nn.GELU(),
+        #                        nn.Linear(config.dims//4,config.finetune.p_nums),nn.Sigmoid())
+        self.net=nn.Sequential(nn.Linear(config.dims,config.finetune.p_nums),nn.Sigmoid())
+        # self.net=nn.Linear(config.dims,config.finetune.p_nums)
+    def forward(self,X_in,task_id,detach=False):
+        if self.detach:
+            X=X_in.detach()
+        else:
+            X=X_in
+        b,f,n,d=X.shape
+        
+        # batch rels
+        task_id=task_id.unsqueeze(1).unsqueeze(1).repeat(1,f,n,1)
+
+        task_token=self.ptokens(task_id)+X
+        # batch frames nodes 1 p_nums
+        # weight=F.softmax(self.net(task_token).unsqueeze(-2),dim=-1)
+        weight=self.net(task_token).unsqueeze(-2)
+        # breakpoint()
+        # batch frames nodes p_nums dims
+        if self.flag:
+            # prompt=self.t_linear(torch.sum(self.tokens(task_id),dim=-2).reshape(b,f,n,self.pnums,self.dims))
+            prompt=torch.sum(self.tokens(task_id),dim=-2).reshape(b,f,n,self.pnums,self.dims)
+        else:
+            prompt=self.tokens(task_id).reshape(b,f,n,self.pnums,self.dims)
+        # breakpoint()
+        # prompt=self.tokens(task_id).reshape(b,f,n,self.pnums,self.dims)
+        # batch frames nodes 1 dims
+        prompt=weight@prompt
+        prompt=prompt.squeeze(-2)
+        return X_in+prompt
+
+
 if __name__=='__main__':
     a=torch.randn(2,10,11,768)
     b=torch.randint(0,157,(2,157))
