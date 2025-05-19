@@ -431,8 +431,6 @@ def get_relation(*kwags):
     # print(relation_list)
     return relation_list
     
-
-
 # def pkl_process_all_(name,device):
 #     hdf5_path=os.path.join('/home/wu_tian_ci/GAFL/data/hdf5/all_features',name+'.hdf5')
 #     img_basepath='/home/wu_tian_ci/revisiting-spatial-temporal-layouts/data/action_genome/frames'
@@ -1957,6 +1955,36 @@ def mapping_table(name,label_type=1):
     print(name,':',len(ans_list),' ',len(keys),' ',np.mean(len_a),' ',np.sum(len_a),' ',len(len_a))
     json.dump(ans_list,open(json_save_path,'w'))
 
+
+def mapping_table_shift(name,label_type=1):
+    full_list=[i for i in range(157)]
+    json_file=json.load(
+            open(os.path.join("/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel/shift",name+'.json'),'r')
+        )
+    keys=list(json_file.keys())
+    if label_type==1:
+        json_save_path=os.path.join('/home/wu_tian_ci/GAFL/json_dataset/mapping/shift',name+'.json')
+    else:
+        json_save_path=os.path.join('/home/wu_tian_ci/GAFL/json_dataset/mapping2/shift',name+'.json')
+    # key2=list(json_file2.keys())
+    json_keys=[item for item in keys if 'label' not in item]
+    ans_list=[]
+    len_a=[]
+    for k in tqdm(json_keys):
+        label_name=k+'_label'
+        json_set=set(json_file[label_name])
+        len_a.append(len(list(json_set)))
+        if len(json_set)>16:
+            continue
+        if label_type==1:
+            l=get_sperate_labels(k,json_file[label_name],full_list)
+        else:
+            l=get_sperate_labels2(k,json_file[label_name],full_list)
+        ans_list.extend(l)
+    print(name,':',len(ans_list),' ',len(keys),' ',np.mean(len_a),' ',np.sum(len_a),' ',len(len_a))
+    json.dump(ans_list,open(json_save_path,'w'))
+
+
 def mapping_table_test(name,label_type=1):
     full_list=[i for i in range(157)]
     json_file=json.load(
@@ -2191,6 +2219,31 @@ def mapping_table_expand2(name):
         )
     keys=list(json_file.keys())
     json_save_path=os.path.join('/home/wu_tian_ci/GAFL/json_dataset/mapping_expand2',name+'.json')
+    # key2=list(json_file2.keys())
+    json_keys=[item for item in keys if 'label' not in item]
+    ans_list=[]
+    len_a=[]
+    for k in tqdm(json_keys):
+        label_name=k+'_label'
+        json_set=set(json_file[label_name])
+        if len(json_set)>16:
+            continue
+        len_a.append(len(list(json_set)))
+        l=get_sperate_labels_expand(k,json_file[label_name],full_list)
+        l2=get_sperate_labels(k,json_file[label_name],full_list)
+        ans_list.extend(l)
+        ans_list.extend(l2)
+
+    print(name,':',len(ans_list),' ',len(keys),' ',np.mean(len_a),' ',np.sum(len_a),' ',len(len_a))
+    json.dump(ans_list,open(json_save_path,'w'))
+
+def mapping_table_expand2_shift(name):
+    full_list=[i for i in range(157)]
+    json_file=json.load(
+            open(os.path.join("/home/wu_tian_ci/GAFL/json_dataset/all_cls_rel/shift",name+'.json'),'r')
+        )
+    keys=list(json_file.keys())
+    json_save_path=os.path.join('/home/wu_tian_ci/GAFL/json_dataset/mapping_expand2/shift',name+'.json')
     # key2=list(json_file2.keys())
     json_keys=[item for item in keys if 'label' not in item]
     ans_list=[]
@@ -2522,7 +2575,11 @@ if __name__=="__main__":
     set_seed()
     # mapping_table_test('test',7)
     # mapping_table_test('test',5)
-    mapping_table_iou('test')
+    # mapping_table_iou('test')
+    for i in range(1,6):
+        mapping_table_expand2_shift('test'+str(i))
+        mapping_table_expand2_shift('train'+str(i))
+
     # trans_all_json()
 
     # for i in range(1,6):
