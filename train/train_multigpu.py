@@ -212,6 +212,10 @@ def train_oracle(args,pretrain):
                 private_label=private_label.to(device)
                 common_label=common_label.to(device)
                 mask_=mask_.to(device)
+                if len(label.shape)==1:
+                    label.unsqueeze_(0)
+                    common_label.unsqueeze_(0)
+                    private_label.unsqueeze_(0)
 
                 
                 if args.mt==0:
@@ -296,6 +300,10 @@ def train_oracle(args,pretrain):
                 common_label=common_label.to(device)
 
                 label=label.to(device).squeeze()
+                if len(label.shape)==1:
+                    label.unsqueeze_(0)
+                    common_label.unsqueeze_(0)
+                    private_label.unsqueeze_(0)
 
                 if args.mt==0:
                     c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
@@ -436,7 +444,7 @@ def train_oracle_shift(args,pretrain):
                 mask=mask.to(device)
                 cls_l=cls_l.to(device)
                 rel_l=rel_l.to(device)
-                label=label.to(device).squeeze()
+                label=label.to(device)
                 cls_ids=cls_ids.to(device)
 
                 token_tensor=token_tensor.to(device)
@@ -446,8 +454,11 @@ def train_oracle_shift(args,pretrain):
 
                 
                 c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
-
-
+                
+                if len(label.shape)==1:
+                    label.unsqueeze_(0)
+                    common_label.unsqueeze_(0)
+                    private_label.unsqueeze_(0)
 
                 loss2,loss2_1,=cri(t_ans,label) 
                 loss1,loss1_1=cri(c_ans,common_label)
@@ -506,7 +517,7 @@ def train_oracle_shift(args,pretrain):
                 private_label=private_label.to(device)
                 common_label=common_label.to(device)
 
-                label=label.to(device).squeeze()
+                label=label.to(device)
 
                 if args.mt==0:
                     c_ans,p_ans,cls_ans,rel_ans,c_features,p_features,recs,human_obj_feature,t_ans=model(frames,cls_ids,rel_l,bbx,token_tensor)
@@ -518,18 +529,19 @@ def train_oracle_shift(args,pretrain):
                     label.unsqueeze_(0)
                     common_label.unsqueeze_(0)
                     private_label.unsqueeze_(0)
-                # c_pre.append(c_ans)
-                # p_pre.append(p_ans)
-                # c_lab.append(common_label)
-                # p_lab.append(private_label)
+                c_pre.append(c_ans)
+                p_pre.append(p_ans)
+                c_lab.append(common_label)
+                p_lab.append(private_label)
                 t_pre.append(t_ans)
                 t_lab.append(label)
 
 
-        # p_pred = distributed_concat(torch.concat(p_pre, dim=0),len(testts.dataset))
-        # p_labe = distributed_concat(torch.concat(p_lab, dim=0),len(testts.dataset))
-        # c_pred = distributed_concat(torch.concat(c_pre, dim=0),len(testts.dataset))
-        # c_labe = distributed_concat(torch.concat(c_lab, dim=0),len(testts.dataset))
+        p_pred = distributed_concat(torch.concat(p_pre, dim=0),len(testts.dataset))
+        p_labe = distributed_concat(torch.concat(p_lab, dim=0),len(testts.dataset))
+        c_pred = distributed_concat(torch.concat(c_pre, dim=0),len(testts.dataset))
+        c_labe = distributed_concat(torch.concat(c_lab, dim=0),len(testts.dataset))
+        
         t_pred = distributed_concat(torch.concat(t_pre, dim=0),len(testts.dataset))
         t_labe = distributed_concat(torch.concat(t_lab, dim=0),len(testts.dataset))
         if local_rank==0:
@@ -537,17 +549,17 @@ def train_oracle_shift(args,pretrain):
             evaluator2.reset()
             evaluator3.reset()
             evaluator4.reset()
-            # evaluator2.process(c_pred,c_labe)
-            # metrics2 = evaluator2.evaluate()
-            # evaluator3.process(p_pred,p_labe)
-            # metrics3 = evaluator3.evaluate()
+            evaluator2.process(c_pred,c_labe)
+            metrics2 = evaluator2.evaluate()
+            evaluator3.process(p_pred,p_labe)
+            metrics3 = evaluator3.evaluate()
             evaluator.process(t_pred,t_labe)
             metrics = evaluator.evaluate()
 
 
             if args.stage in [1,6,7]:
-                # acc_str='t:'+str(round(metrics['map']*100,5))+'_c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))   
-                acc_str='t:'+str(round(metrics['map']*100,5))
+                acc_str='t:'+str(round(metrics['map']*100,5))+'_c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))   
+                # acc_str='t:'+str(round(metrics['map']*100,5))
                 # acc_str='c:'+str(round(metrics2['map']*100,5))+'_p:'+str(round(metrics3['map']*100,5))             
             save_checkpoint(epoch+1,model.module,acc_str,optimizer,scheduler,time_stamp,'pretrain')
             print('saved')

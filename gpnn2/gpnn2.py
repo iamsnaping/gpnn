@@ -166,7 +166,8 @@ class GPNNCell4(torch.nn.Module):
         if self.visual:
             if mask is not None:
                 
-                weight_edge_=self.normalize_score((weight_edge*mask)[:,:,:9,:])
+                # weight_edge_=self.normalize_score((weight_edge*mask)[:,:,:9,:])
+                weight_edge_=(weight_edge*mask)[:,:,:9,:]
                 # breakpoint()
             else:
                 raise ModuleNotFoundError
